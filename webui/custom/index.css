@@ -260,6 +260,9 @@ svg {
 
 .action-btn {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
   border-radius: 6px;
   cursor: pointer;
   display: inline-flex;

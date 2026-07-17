@@ -227,7 +227,7 @@ class Uploader {
     /**
      * @type Element
      */
-    this.$uploadStatus = null
+    this.$uploadStatus = null;
     this.uploaded = 0;
     this.uploadOffset = 0;
     this.lastUptime = 0;
@@ -239,17 +239,27 @@ class Uploader {
 
   upload() {
     const { idx, name, url } = this;
-    const encodedName = encodedStr(name);
-    $uploadersTable.insertAdjacentHTML("beforeend", `
-  <tr id="upload${idx}" class="uploader">
-    <td class="path cell-icon">
-      ${getPathSvg()}
-    </td>
-    <td class="path cell-name">
-      <a href="${url}">${encodedName}</a>
-    </td>
-    <td class="cell-status upload-status" id="uploadStatus${idx}"></td>
-  </tr>`);
+    const $row = document.createElement("tr");
+    $row.id = `upload${idx}`;
+    $row.className = "uploader";
+
+    const $iconCell = document.createElement("td");
+    $iconCell.className = "path cell-icon";
+    $iconCell.innerHTML = getPathSvg();
+
+    const $nameCell = document.createElement("td");
+    $nameCell.className = "path cell-name";
+    const $link = document.createElement("a");
+    $link.href = url;
+    $link.textContent = name;
+    $nameCell.appendChild($link);
+
+    const $statusCell = document.createElement("td");
+    $statusCell.className = "cell-status upload-status";
+    $statusCell.id = `uploadStatus${idx}`;
+
+    $row.append($iconCell, $nameCell, $statusCell);
+    $uploadersTable.appendChild($row);
     $uploadersTable.classList.remove("hidden");
     $emptyFolder.classList.add("hidden");
     this.$uploadStatus = document.getElementById(`uploadStatus${idx}`);
@@ -280,7 +290,7 @@ class Uploader {
         if (ajax.status >= 200 && ajax.status < 300) {
           this.complete();
         } else {
-          if (ajax.status != 0) {
+          if (ajax.status !== 0) {
             this.fail(`${ajax.status} ${ajax.statusText}`);
           }
         }
@@ -305,7 +315,7 @@ class Uploader {
       method: "HEAD",
     });
     let uploadOffset = 0;
-    if (res.status == 200) {
+    if (res.status === 200) {
       let value = res.headers.get("content-length");
       uploadOffset = parseInt(value) || 0;
     }
@@ -360,7 +370,7 @@ Uploader.queues = [];
 
 Uploader.runQueue = async () => {
   if (Uploader.runnings >= DUFS_MAX_UPLOADINGS) return;
-  if (Uploader.queues.length == 0) return;
+  if (Uploader.queues.length === 0) return;
   Uploader.runnings++;
   let uploader = Uploader.queues.shift();
   if (!Uploader.auth) {
@@ -510,64 +520,95 @@ function renderPathsTableBody() {
  * @param {number} index
  */
 function addPath(file, index) {
-  const encodedName = encodedStr(file.name);
   let url = newUrl(file.name);
-  let actionDelete = "";
-  let actionDownload = "";
-  let actionMove = "";
-  let actionEdit = "";
-  let actionView = "";
   let isDir = file.path_type.endsWith("Dir");
   if (isDir) {
     url += "/";
-    if (DATA.allow_archive) {
-      actionDownload = `
-      <div class="action-btn">
-        <a class="dlwt" href="${url}?zip" title="Download folder as a .zip file" download>${ICONS.download}</a>
-      </div>`;
-    }
-  } else {
-    actionDownload = `
-    <div class="action-btn" >
-      <a class="dlwt" href="${url}" title="Download file" download>${ICONS.download}</a>
-    </div>`;
   }
-  if (DATA.allow_delete) {
-    if (DATA.allow_upload) {
-      actionMove = `<div onclick="movePath(${index})" class="action-btn" id="moveBtn${index}" title="Move & Rename">${ICONS.move}</div>`;
-      if (!isDir) {
-        actionEdit = `<a class="action-btn" title="Edit file" target="_blank" href="${url}?edit">${ICONS.edit}</a>`;
-      }
-    }
-    actionDelete = `
-    <div onclick="deletePath(${index})" class="action-btn" id="deleteBtn${index}" title="Delete">${ICONS.delete}</div>`;
-  }
-  if (!actionEdit && !isDir) {
-    actionView = `<a class="action-btn" title="View file" target="_blank" href="${url}?view">${ICONS.view}</a>`;
-  }
-  let actionCell = `
-  <td class="cell-actions">
-    ${actionDownload}
-    ${actionView}
-    ${actionMove}
-    ${actionDelete}
-    ${actionEdit}
-  </td>`;
 
   let sizeDisplay = isDir ? formatDirSize(file.size) : formatFileSize(file.size).join(" ");
 
-  $pathsTableBody.insertAdjacentHTML("beforeend", `
-<tr id="addPath${index}">
-  <td class="path cell-icon">
-    ${getPathSvg(file.path_type)}
-  </td>
-  <td class="path cell-name">
-    <a href="${url}" ${isDir ? "" : `target="_blank"`}>${encodedName}</a>
-  </td>
-  <td class="cell-mtime">${formatMtime(file.mtime)}</td>
-  <td class="cell-size">${sizeDisplay}</td>
-  ${actionCell}
-</tr>`);
+  const $row = document.createElement("tr");
+  $row.id = `addPath${index}`;
+
+  const $iconCell = document.createElement("td");
+  $iconCell.className = "path cell-icon";
+  $iconCell.innerHTML = getPathSvg(file.path_type);
+
+  const $nameCell = document.createElement("td");
+  $nameCell.className = "path cell-name";
+  const $link = document.createElement("a");
+  $link.href = url;
+  if (!isDir) {
+    $link.target = "_blank";
+  }
+  $link.textContent = file.name;
+  $nameCell.appendChild($link);
+
+  const $mtimeCell = document.createElement("td");
+  $mtimeCell.className = "cell-mtime";
+  $mtimeCell.textContent = formatMtime(file.mtime);
+
+  const $sizeCell = document.createElement("td");
+  $sizeCell.className = "cell-size";
+  $sizeCell.textContent = sizeDisplay;
+
+  const $actionCell = document.createElement("td");
+  $actionCell.className = "cell-actions";
+  appendPathActions($actionCell, url, isDir, index);
+
+  $row.append($iconCell, $nameCell, $mtimeCell, $sizeCell, $actionCell);
+  $pathsTableBody.appendChild($row);
+}
+
+function appendPathActions($actionCell, url, isDir, index) {
+  if (isDir && DATA.allow_archive) {
+    $actionCell.appendChild(createActionLink(`${url}?zip`, "Download folder as a .zip file", ICONS.download, { download: true, className: "dlwt" }));
+  } else if (!isDir) {
+    $actionCell.appendChild(createActionLink(url, "Download file", ICONS.download, { download: true, className: "dlwt" }));
+  }
+
+  let hasEditAction = false;
+  if (DATA.allow_delete) {
+    if (DATA.allow_upload) {
+      $actionCell.appendChild(createActionButton("Move & Rename", ICONS.move, () => movePath(index), `moveBtn${index}`));
+      if (!isDir) {
+        hasEditAction = true;
+        $actionCell.appendChild(createActionLink(`${url}?edit`, "Edit file", ICONS.edit, { target: "_blank" }));
+      }
+    }
+    $actionCell.appendChild(createActionButton("Delete", ICONS.delete, () => deletePath(index), `deleteBtn${index}`));
+  }
+  if (!hasEditAction && !isDir) {
+    $actionCell.appendChild(createActionLink(`${url}?view`, "View file", ICONS.view, { target: "_blank" }));
+  }
+}
+
+function createActionLink(href, title, icon, options = {}) {
+  const $link = document.createElement("a");
+  $link.className = options.className ? `action-btn ${options.className}` : "action-btn";
+  $link.href = href;
+  $link.title = title;
+  if (options.download) {
+    $link.download = "";
+  }
+  if (options.target) {
+    $link.target = options.target;
+  }
+  $link.innerHTML = icon;
+  return $link;
+}
+
+function createActionButton(title, icon, onClick, id) {
+  const $button = document.createElement("button");
+  $button.type = "button";
+  $button.className = "action-btn";
+  $button.id = id;
+  $button.title = title;
+  $button.setAttribute("aria-label", title);
+  $button.addEventListener("click", onClick);
+  $button.innerHTML = icon;
+  return $button;
 }
 
 function setupDropzone() {
@@ -701,7 +742,7 @@ async function setupEditorPage() {
   $download.classList.remove("hidden");
   $download.href = url;
 
-  if (DATA.kind == "Edit") {
+  if (DATA.kind === "Edit") {
     const $moveFile = document.querySelector(".move-file");
     $moveFile.classList.remove("hidden");
     $moveFile.addEventListener("click", async () => {
@@ -727,7 +768,7 @@ async function setupEditorPage() {
       $saveBtn.classList.remove("hidden");
       $saveBtn.addEventListener("click", saveChange);
     }
-  } else if (DATA.kind == "View") {
+  } else if (DATA.kind === "View") {
     $editor.readonly = true;
   }
 
@@ -736,7 +777,12 @@ async function setupEditorPage() {
     const url = baseUrl();
     const ext = extName(baseName(url));
     if (IFRAME_FORMATS.find(v => v === ext)) {
-      $notEditable.insertAdjacentHTML("afterend", `<iframe src="${url}" sandbox width="100%" height="${window.innerHeight - 100}px"></iframe>`);
+      const $iframe = document.createElement("iframe");
+      $iframe.src = url;
+      $iframe.setAttribute("sandbox", "");
+      $iframe.width = "100%";
+      $iframe.height = `${window.innerHeight - 100}px`;
+      $notEditable.after($iframe);
     } else {
       $notEditable.classList.remove("hidden");
       $notEditable.textContent = "Cannot edit because file is too large or binary.";
@@ -1000,9 +1046,9 @@ function formatDirSize(size) {
 }
 
 function formatFileSize(size) {
-  if (size == null) return [0, "B"];
+  if (size === null || size === undefined) return [0, "B"];
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  if (size == 0) return [0, "B"];
+  if (size === 0) return [0, "B"];
   const i = parseInt(Math.floor(Math.log(size) / Math.log(1024)));
   const raw = size / Math.pow(1024, i);
   let value;

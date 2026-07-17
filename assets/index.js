@@ -380,7 +380,7 @@ async function setupIndexPage() {
     }
     const permission = DATA.current_permission;
     const badges = [
-      `<span class="permission-badge permission-${permission.access}">${encodedStr(permission.role)}</span>`,
+      `<span class="permission-badge ${permissionClass(permission.access)}">${encodedStr(permission.role)}</span>`,
       DATA.user ? `<span>Signed in as <b>${encodedStr(DATA.user)}</b></span>` : `<span>Anonymous access</span>`,
       `<span>${permission.can_write ? "Can manage files here" : permission.can_read ? "Read-only folder" : "Limited folder index"}</span>`,
     ];
@@ -398,9 +398,10 @@ async function setupIndexPage() {
   }
 
   function renderAdminPermissionOverview(permissions) {
-    const users = Array.isArray(permissions.users) ? permissions.users : [];
-    const groups = Array.isArray(permissions.groups) ? permissions.groups : [];
-    const roles = Array.isArray(permissions.roles) ? permissions.roles : [];
+    const overview = permissions && typeof permissions === "object" ? permissions : {};
+    const users = Array.isArray(overview.users) ? overview.users : [];
+    const groups = Array.isArray(overview.groups) ? overview.groups : [];
+    const roles = Array.isArray(overview.roles) ? overview.roles : [];
     return `
       <details class="admin-permissions">
         <summary>Permission management overview</summary>
@@ -578,7 +579,7 @@ function addPath(file, index) {
 
   let sizeDisplay = isDir ? formatDirSize(file.size) : formatFileSize(file.size).join(" ");
   const permissionBadge = file.permission
-    ? `<span class="path-permission permission-badge permission-${file.permission.access}" title="${encodedStr(file.permission.access)}">${encodedStr(file.permission.role)}</span>`
+    ? `<span class="path-permission permission-badge ${permissionClass(file.permission.access)}" title="${encodedStr(file.permission.access)}">${encodedStr(file.permission.role)}</span>`
     : "";
 
   $pathsTableBody.insertAdjacentHTML("beforeend", `
@@ -593,6 +594,19 @@ function addPath(file, index) {
   <td class="cell-size">${sizeDisplay}</td>
   ${actionCell}
 </tr>`);
+}
+
+function permissionClass(access) {
+  switch (access) {
+    case "read-write":
+      return "permission-read-write";
+    case "read-only":
+      return "permission-read-only";
+    case "limited":
+      return "permission-limited";
+    default:
+      return "";
+  }
 }
 
 function setupDropzone() {

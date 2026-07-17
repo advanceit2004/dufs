@@ -464,7 +464,7 @@ impl AccessPaths {
                 return Some(self.clone());
             } else {
                 let mut target = self.clone();
-                // Preserve any explicit child overrides while applying inherited access.
+                // Materialize inherited access on wildcard nodes without dropping explicit descendants.
                 if target.perm.indexonly() {
                     target.perm = perm;
                 }

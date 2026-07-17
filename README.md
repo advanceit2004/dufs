@@ -424,6 +424,14 @@ Your assets folder must contains a `index.html` file.
 
 > A customized 404.html page is also supported.
 
+This fork embeds the maintained custom WebUI from `webui/custom` into normal releases while keeping upstream's `--assets` override behavior. You can also run the same WebUI against any compatible dufs binary:
+
+```
+dufs --assets webui/custom
+```
+
+Keeping the fork WebUI in `webui/custom` reduces conflicts when syncing upstream updates to the original `assets` directory.
+
 Here are some Third-party customize UI project:
 
 - https://github.com/TransparentLC/dufs-material-assets

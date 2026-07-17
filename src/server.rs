@@ -51,10 +51,10 @@ use xml::escape::escape_str_pcdata;
 pub type Request = hyper::Request<Incoming>;
 pub type Response = hyper::Response<BoxBody<Bytes, anyhow::Error>>;
 
-const INDEX_HTML: &str = include_str!("../assets/index.html");
-const INDEX_CSS: &str = include_str!("../assets/index.css");
-const INDEX_JS: &str = include_str!("../assets/index.js");
-const FAVICON_ICO: &[u8] = include_bytes!("../assets/favicon.ico");
+const INDEX_HTML: &str = include_str!("../webui/custom/index.html");
+const INDEX_CSS: &str = include_str!("../webui/custom/index.css");
+const INDEX_JS: &str = include_str!("../webui/custom/index.js");
+const FAVICON_ICO: &[u8] = include_bytes!("../webui/custom/favicon.ico");
 const INDEX_NAME: &str = "index.html";
 const BUF_SIZE: usize = 65536;
 const EDITABLE_TEXT_MAX_SIZE: u64 = 4194304; // 4M

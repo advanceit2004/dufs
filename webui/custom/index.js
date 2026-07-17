@@ -43,6 +43,8 @@ var DIR_EMPTY_NOTE;
  */
 const PARAMS = Object.fromEntries(new URLSearchParams(window.location.search).entries());
 
+const THEME_STORAGE_KEY = "dufs-theme";
+
 const IFRAME_FORMATS = [
   ".pdf",
   ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg",
@@ -105,6 +107,20 @@ let $logoutBtn;
  * @type Element
  */
 let $userName;
+/**
+ * @type Element
+ */
+let $themeBtn;
+/**
+ * @type Element
+ */
+let $toast;
+/**
+ * @type Element
+ */
+let $dropHint;
+
+applyStoredTheme();
 
 // manage unload event to prevent leaving with uploads in progress
 const beforeUnloadHandler = (event) => {
@@ -119,7 +135,7 @@ const beforeUnloadHandler = (event) => {
 window.addEventListener("DOMContentLoaded", async () => {
   const $indexData = document.getElementById('index-data');
   if (!$indexData) {
-    alert("No data");
+    notify("No data");
     return;
   }
 
@@ -139,8 +155,12 @@ async function ready() {
   $loginBtn = document.querySelector(".login-btn");
   $logoutBtn = document.querySelector(".logout-btn");
   $userName = document.querySelector(".user-name");
+  $themeBtn = document.querySelector(".theme-btn");
+  $toast = document.querySelector(".toast");
+  $dropHint = document.querySelector(".drop-hint");
 
   window.addEventListener('beforeunload', beforeUnloadHandler);
+  setupTheme();
 
   addBreadcrumb(DATA.href, DATA.uri_prefix);
 
@@ -160,6 +180,41 @@ async function ready() {
 
     await setupEditorPage();
   }
+}
+
+function applyStoredTheme() {
+  const theme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+function setupTheme() {
+  if (!$themeBtn) return;
+  const isDarkPreferred = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const currentTheme = document.documentElement.dataset.theme || (isDarkPreferred ? "dark" : "light");
+  $themeBtn.title = `Theme: ${currentTheme}`;
+  $themeBtn.addEventListener("click", () => {
+    const nextTheme = (document.documentElement.dataset.theme || currentTheme) === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    $themeBtn.title = `Theme: ${nextTheme}`;
+    notify(`Switched to ${nextTheme} theme`);
+  });
+}
+
+function notify(message) {
+  const $target = $toast || document.querySelector(".toast");
+  if (!$target) {
+    alert(message);
+    return;
+  }
+  clearTimeout(notify.timer);
+  $target.textContent = message;
+  $target.classList.remove("hidden");
+  notify.timer = setTimeout(() => {
+    $target.classList.add("hidden");
+  }, 3200);
 }
 
 class Uploader {
@@ -283,10 +338,11 @@ class Uploader {
   }
 
   fail(reason = "") {
-    this.$uploadStatus.innerHTML = `<span style="width: 20px;" title="${reason}">✗</span><span class="retry-btn" id="retry${this.idx}" title="Retry">↻</span>`;
+    this.$uploadStatus.innerHTML = `<span style="width: 20px;" title="${encodedStr(reason)}">✗</span><span class="retry-btn" id="retry${this.idx}" title="Retry">↻</span>`;
     failUploaders.set(this.idx, this);
     Uploader.runnings--;
     Uploader.runQueue();
+    notify(`Upload failed${reason ? `: ${reason}` : ""}`);
   }
 }
 
@@ -521,6 +577,16 @@ function setupDropzone() {
       e.stopPropagation();
     });
   });
+  ["dragover", "dragenter"].forEach(name => {
+    document.addEventListener(name, () => {
+      $dropHint?.classList.remove("hidden");
+    });
+  });
+  ["dragleave", "dragend", "drop"].forEach(name => {
+    document.addEventListener(name, () => {
+      $dropHint?.classList.add("hidden");
+    });
+  });
   document.addEventListener("drop", async e => {
     if (!e.dataTransfer.items[0].webkitGetAsEntry) {
       const files = Array.from(e.dataTransfer.files).filter(v => v.size > 0);
@@ -535,6 +601,7 @@ function setupDropzone() {
       }
       addFileEntries(entries, []);
     }
+    notify("Upload queue updated");
   });
 }
 
@@ -575,7 +642,7 @@ function setupDownloadWithToken() {
         tempA.click();
         document.body.removeChild(tempA);
       } catch (err) {
-        alert(`Failed to download, ${err.message}`);
+        notify(`Failed to download, ${err.message}`);
       }
     });
   });
@@ -691,7 +758,7 @@ async function setupEditorPage() {
       $editor.value = decoder.decode(dataView);
     }
   } catch (err) {
-    alert(`Failed to get file, ${err.message}`);
+    notify(`Failed to get file, ${err.message}`);
   }
 }
 
@@ -724,7 +791,7 @@ async function doDeletePath(name, url, cb) {
     await assertResOK(res);
     cb();
   } catch (err) {
-    alert(`Cannot delete \`${file.name}\`, ${err.message}`);
+    notify(`Cannot delete \`${name}\`, ${err.message}`);
   }
 }
 
@@ -775,7 +842,7 @@ async function doMovePath(fileUrl) {
     await assertResOK(res2);
     return newFileUrl;
   } catch (err) {
-    alert(`Cannot move \`${filePath}\` to \`${newPath}\`, ${err.message}`);
+    notify(`Cannot move \`${filePath}\` to \`${newPath}\`, ${err.message}`);
   }
 }
 
@@ -791,7 +858,7 @@ async function saveChange() {
     });
     location.reload();
   } catch (err) {
-    alert(`Failed to save file, ${err.message}`);
+    notify(`Failed to save file, ${err.message}`);
   }
 }
 
@@ -832,7 +899,7 @@ async function createFolder(name) {
     await assertResOK(res);
     location.href = url;
   } catch (err) {
-    alert(`Cannot create folder \`${name}\`, ${err.message}`);
+    notify(`Cannot create folder \`${name}\`, ${err.message}`);
   }
 }
 
@@ -847,7 +914,7 @@ async function createFile(name) {
     await assertResOK(res);
     location.href = url + "?edit";
   } catch (err) {
-    alert(`Cannot create file \`${name}\`, ${err.message}`);
+    notify(`Cannot create file \`${name}\`, ${err.message}`);
   }
 }
 

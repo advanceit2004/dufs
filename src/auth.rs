@@ -36,9 +36,13 @@ pub struct AccessControl {
     use_hashed_password: bool,
     users: IndexMap<String, (String, AccessPaths)>,
     anonymous: Option<AccessPaths>,
+    /// Users allowed to see business permission-management metadata in the Web UI.
     admins: Vec<String>,
+    /// Structured users loaded from the config-file business auth syntax.
     business_users: BTreeMap<String, BusinessUserConfig>,
+    /// Structured groups loaded from the config-file business auth syntax.
     business_groups: BTreeMap<String, BusinessGroupConfig>,
+    /// Structured roles loaded from the config-file business auth syntax.
     business_roles: BTreeMap<String, BusinessRoleConfig>,
 }
 
@@ -193,7 +197,7 @@ impl AccessControl {
     }
 
     pub fn is_admin(&self, user: Option<&str>) -> bool {
-        user.map(|user| self.admins.iter().any(|admin| admin == user))
+        user.map(|username| self.admins.iter().any(|admin| admin == username))
             .unwrap_or_default()
     }
 
@@ -460,6 +464,7 @@ impl AccessPaths {
                 return Some(self.clone());
             } else {
                 let mut target = self.clone();
+                // Preserve any explicit child overrides while applying inherited access.
                 if target.perm.indexonly() {
                     target.perm = perm;
                 }
@@ -530,7 +535,7 @@ impl AccessPerm {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PermissionInfo {
     pub access: String,
     pub role: String,

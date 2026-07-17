@@ -1580,7 +1580,7 @@ pub struct IndexData {
     pub paths: Vec<PathItem>,
 }
 
-#[derive(Debug, Serialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Serialize, Eq, PartialEq)]
 pub struct PathItem {
     pub path_type: PathType,
     pub name: String,

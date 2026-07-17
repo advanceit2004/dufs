@@ -398,9 +398,9 @@ async function setupIndexPage() {
   }
 
   function renderAdminPermissionOverview(permissions) {
-    const users = permissions.users || [];
-    const groups = permissions.groups || [];
-    const roles = permissions.roles || [];
+    const users = Array.isArray(permissions.users) ? permissions.users : [];
+    const groups = Array.isArray(permissions.groups) ? permissions.groups : [];
+    const roles = Array.isArray(permissions.roles) ? permissions.roles : [];
     return `
       <details class="admin-permissions">
         <summary>Permission management overview</summary>

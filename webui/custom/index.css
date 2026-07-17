@@ -480,13 +480,13 @@ button:focus-visible,
     --bg-hover: #1a1a1a;
     --text-primary: #fff;
     --text-secondary: #ddd;
-    --text-tertiary: #586069;  /*Unchanged in both color schemes*/
+    --text-tertiary: #586069;  /* Unchanged in both color schemes */
     --text-accent: #3191ff;
     --svg-primary: #fff;
     --svg-secondary: #fff;
     --svg-tertiary: #fff6;
     --border-primary: #fff6;
-    --border-secondary: #ced4da; /*Unchanged in both color schemes*/
+    --border-secondary: #ced4da; /* Unchanged in both color schemes */
   }
 }
 

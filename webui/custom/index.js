@@ -245,7 +245,7 @@ class Uploader {
 
     const $iconCell = document.createElement("td");
     $iconCell.className = "path cell-icon";
-    $iconCell.innerHTML = getPathSvg();
+    $iconCell.innerHTML = getPathSvg("File");
 
     const $nameCell = document.createElement("td");
     $nameCell.className = "path cell-name";
@@ -332,14 +332,17 @@ class Uploader {
     const speedText = `${speedValue} ${speedUnit}/s`;
     const progress = formatPercent(((event.loaded + this.uploadOffset) / this.file.size) * 100);
     const duration = formatDuration((event.total - event.loaded) / speed);
-    this.$uploadStatus.innerHTML = `<span style="width: 80px;">${speedText}</span><span style="margin-left: 5px;">${progress} ${duration}</span>`;
+    this.$uploadStatus.replaceChildren(
+      createStatusSpan(speedText, "80px"),
+      createStatusSpan(`${progress} ${duration}`, null, "5px"),
+    );
     this.uploaded = event.loaded;
     this.lastUptime = now;
   }
 
   complete() {
     const $uploadStatusNew = this.$uploadStatus.cloneNode(true);
-    $uploadStatusNew.innerHTML = `✓`;
+    $uploadStatusNew.textContent = `✓`;
     this.$uploadStatus.parentNode.replaceChild($uploadStatusNew, this.$uploadStatus);
     this.$uploadStatus = null;
     failUploaders.delete(this.idx);
@@ -348,12 +351,30 @@ class Uploader {
   }
 
   fail(reason = "") {
-    this.$uploadStatus.innerHTML = `<span style="width: 20px;" title="${encodedStr(reason)}">✗</span><span class="retry-btn" id="retry${this.idx}" title="Retry">↻</span>`;
+    const $failed = createStatusSpan("✗", "20px");
+    $failed.title = reason;
+    const $retry = createStatusSpan("↻");
+    $retry.className = "retry-btn";
+    $retry.id = `retry${this.idx}`;
+    $retry.title = "Retry";
+    this.$uploadStatus.replaceChildren($failed, $retry);
     failUploaders.set(this.idx, this);
     Uploader.runnings--;
     Uploader.runQueue();
     notify(`Upload failed${reason ? `: ${reason}` : ""}`);
   }
+}
+
+function createStatusSpan(text, width, marginLeft) {
+  const $span = document.createElement("span");
+  $span.textContent = text;
+  if (width) {
+    $span.style.width = width;
+  }
+  if (marginLeft) {
+    $span.style.marginLeft = marginLeft;
+  }
+  return $span;
 }
 
 Uploader.globalIdx = 0;
@@ -1077,7 +1098,7 @@ function formatPercent(percent) {
 }
 
 function encodedStr(rawStr) {
-  return rawStr.replace(/[\u00A0-\u9999<>\&]/g, function (i) {
+  return rawStr.replace(/[\u00A0-\u9999<>&]/g, function (i) {
     return '&#' + i.charCodeAt(0) + ';';
   });
 }
@@ -1104,15 +1125,7 @@ function decodeBase64(base64String) {
   const binString = atob(base64String);
   const len = binString.length;
   const bytes = new Uint8Array(len);
-  const arr = new Uint32Array(bytes.buffer, 0, Math.floor(len / 4));
-  let i = 0;
-  for (; i < arr.length; i++) {
-    arr[i] = binString.charCodeAt(i * 4) |
-      (binString.charCodeAt(i * 4 + 1) << 8) |
-      (binString.charCodeAt(i * 4 + 2) << 16) |
-      (binString.charCodeAt(i * 4 + 3) << 24);
-  }
-  for (i = i * 4; i < len; i++) {
+  for (let i = 0; i < len; i++) {
     bytes[i] = binString.charCodeAt(i);
   }
   return new TextDecoder().decode(bytes);

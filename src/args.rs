@@ -9,7 +9,7 @@ use std::env;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use crate::auth::AccessControl;
+use crate::auth::{AccessControl, BusinessAuthConfig};
 use crate::http_logger::HttpLogger;
 use crate::utils::{encode_uri, is_ipv6_available};
 
@@ -616,8 +616,22 @@ fn deserialize_access_control<'de, D>(deserializer: D) -> Result<AccessControl, 
 where
     D: Deserializer<'de>,
 {
-    let rules: Vec<&str> = Vec::deserialize(deserializer)?;
-    AccessControl::new(&rules).map_err(serde::de::Error::custom)
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AuthConfig {
+        Rules(Vec<String>),
+        Business(BusinessAuthConfig),
+    }
+
+    match AuthConfig::deserialize(deserializer)? {
+        AuthConfig::Rules(rules) => {
+            let rules: Vec<&str> = rules.iter().map(String::as_str).collect();
+            AccessControl::new(&rules).map_err(serde::de::Error::custom)
+        }
+        AuthConfig::Business(config) => {
+            AccessControl::new_business(config).map_err(serde::de::Error::custom)
+        }
+    }
 }
 
 fn deserialize_log_http<'de, D>(deserializer: D) -> Result<HttpLogger, D::Error>

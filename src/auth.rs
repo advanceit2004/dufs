@@ -8,10 +8,11 @@ use hyper::{header::WWW_AUTHENTICATE, Method};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use md5::Context;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sha_crypt::PasswordVerifier;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -35,6 +36,10 @@ pub struct AccessControl {
     use_hashed_password: bool,
     users: IndexMap<String, (String, AccessPaths)>,
     anonymous: Option<AccessPaths>,
+    admins: Vec<String>,
+    business_users: BTreeMap<String, BusinessUserConfig>,
+    business_groups: BTreeMap<String, BusinessGroupConfig>,
+    business_roles: BTreeMap<String, BusinessRoleConfig>,
 }
 
 impl Default for AccessControl {
@@ -44,6 +49,10 @@ impl Default for AccessControl {
             use_hashed_password: false,
             users: IndexMap::new(),
             anonymous: Some(AccessPaths::new(AccessPerm::ReadWrite)),
+            admins: vec![],
+            business_users: BTreeMap::new(),
+            business_groups: BTreeMap::new(),
+            business_roles: BTreeMap::new(),
         }
     }
 }
@@ -106,11 +115,137 @@ impl AccessControl {
             use_hashed_password,
             users,
             anonymous,
+            admins: vec![],
+            business_users: BTreeMap::new(),
+            business_groups: BTreeMap::new(),
+            business_roles: BTreeMap::new(),
         })
+    }
+
+    pub fn new_business(config: BusinessAuthConfig) -> Result<Self> {
+        let mut rules = config.rules.clone();
+        let mut admins = config.admins.clone();
+
+        for (user, user_config) in &config.users {
+            if user_config.password.is_empty() {
+                bail!("Invalid auth user `{user}`, password is required");
+            }
+            let mut paths = user_config.paths.clone();
+            for role in &user_config.roles {
+                if role == "admin" && !admins.iter().any(|v| v == user) {
+                    admins.push(user.clone());
+                }
+                if let Some(role_config) = config.roles.get(role) {
+                    paths.extend(role_config.paths.clone());
+                } else if role != "admin" {
+                    bail!("Invalid auth user `{user}`, unknown role `{role}`");
+                }
+            }
+            for group in &user_config.groups {
+                let Some(group_config) = config.groups.get(group) else {
+                    bail!("Invalid auth user `{user}`, unknown group `{group}`");
+                };
+                paths.extend(group_config.paths.clone());
+                for role in &group_config.roles {
+                    if role == "admin" && !admins.iter().any(|v| v == user) {
+                        admins.push(user.clone());
+                    }
+                    if let Some(role_config) = config.roles.get(role) {
+                        paths.extend(role_config.paths.clone());
+                    } else if role != "admin" {
+                        bail!("Invalid auth group `{group}`, unknown role `{role}`");
+                    }
+                }
+            }
+            if user_config.admin && !admins.iter().any(|v| v == user) {
+                admins.push(user.clone());
+            }
+            if paths.is_empty() {
+                paths.push("/".to_string());
+            }
+            rules.push(format!(
+                "{}:{}@{}",
+                user,
+                user_config.password,
+                paths.join(",")
+            ));
+        }
+
+        for (group, group_config) in &config.groups {
+            for member in &group_config.members {
+                if !config.users.contains_key(member) {
+                    bail!("Invalid auth group `{group}`, unknown member `{member}`");
+                }
+            }
+        }
+
+        let rule_refs: Vec<&str> = rules.iter().map(String::as_str).collect();
+        let mut access = Self::new(&rule_refs)?;
+        access.admins = admins;
+        access.business_users = config.users;
+        access.business_groups = config.groups;
+        access.business_roles = config.roles;
+        Ok(access)
     }
 
     pub fn has_users(&self) -> bool {
         !self.users.is_empty()
+    }
+
+    pub fn is_admin(&self, user: Option<&str>) -> bool {
+        user.map(|user| self.admins.iter().any(|admin| admin == user))
+            .unwrap_or_default()
+    }
+
+    pub fn permission_overview(&self, user: Option<&str>) -> Option<PermissionOverview> {
+        if !self.is_admin(user) {
+            return None;
+        }
+        let users = if self.business_users.is_empty() {
+            self.users
+                .keys()
+                .map(|name| UserPermissionSummary {
+                    name: name.clone(),
+                    admin: self.is_admin(Some(name)),
+                    groups: vec![],
+                    roles: vec![],
+                    paths: vec![],
+                })
+                .collect()
+        } else {
+            self.business_users
+                .iter()
+                .map(|(name, config)| UserPermissionSummary {
+                    name: name.clone(),
+                    admin: self.is_admin(Some(name)),
+                    groups: config.groups.clone(),
+                    roles: config.roles.clone(),
+                    paths: config.paths.clone(),
+                })
+                .collect()
+        };
+        Some(PermissionOverview {
+            users,
+            groups: self
+                .business_groups
+                .iter()
+                .map(|(name, config)| GroupPermissionSummary {
+                    name: name.clone(),
+                    members: config.members.clone(),
+                    roles: config.roles.clone(),
+                    paths: config.paths.clone(),
+                })
+                .collect(),
+            roles: self
+                .business_roles
+                .iter()
+                .map(|(name, config)| RolePermissionSummary {
+                    name: name.clone(),
+                    description: config.description.clone(),
+                    paths: config.paths.clone(),
+                })
+                .collect(),
+        })
     }
 
     pub fn guard(
@@ -344,6 +479,14 @@ impl AccessPaths {
         self.children.keys().collect()
     }
 
+    pub fn permission_info(&self) -> PermissionInfo {
+        PermissionInfo::new(self.perm)
+    }
+
+    pub fn child_permission_info(&self, name: &str) -> Option<PermissionInfo> {
+        self.find(name).map(|paths| paths.permission_info())
+    }
+
     pub fn entry_paths(&self, base: &Path) -> Vec<PathBuf> {
         if !self.perm().indexonly() {
             return vec![base.to_path_buf()];
@@ -381,6 +524,105 @@ impl AccessPerm {
     pub fn readwrite(&self) -> bool {
         self == &AccessPerm::ReadWrite
     }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PermissionInfo {
+    pub access: String,
+    pub role: String,
+    pub can_read: bool,
+    pub can_write: bool,
+}
+
+impl PermissionInfo {
+    fn new(perm: AccessPerm) -> Self {
+        match perm {
+            AccessPerm::IndexOnly => Self {
+                access: "limited".to_string(),
+                role: "Limited".to_string(),
+                can_read: false,
+                can_write: false,
+            },
+            AccessPerm::ReadOnly => Self {
+                access: "read-only".to_string(),
+                role: "Viewer".to_string(),
+                can_read: true,
+                can_write: false,
+            },
+            AccessPerm::ReadWrite => Self {
+                access: "read-write".to_string(),
+                role: "Editor".to_string(),
+                can_read: true,
+                can_write: true,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct BusinessAuthConfig {
+    pub rules: Vec<String>,
+    pub users: BTreeMap<String, BusinessUserConfig>,
+    pub groups: BTreeMap<String, BusinessGroupConfig>,
+    pub roles: BTreeMap<String, BusinessRoleConfig>,
+    pub admins: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct BusinessUserConfig {
+    pub password: String,
+    pub paths: Vec<String>,
+    pub groups: Vec<String>,
+    pub roles: Vec<String>,
+    pub admin: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct BusinessGroupConfig {
+    pub members: Vec<String>,
+    pub paths: Vec<String>,
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct BusinessRoleConfig {
+    pub description: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PermissionOverview {
+    pub users: Vec<UserPermissionSummary>,
+    pub groups: Vec<GroupPermissionSummary>,
+    pub roles: Vec<RolePermissionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UserPermissionSummary {
+    pub name: String,
+    pub admin: bool,
+    pub groups: Vec<String>,
+    pub roles: Vec<String>,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GroupPermissionSummary {
+    pub name: String,
+    pub members: Vec<String>,
+    pub roles: Vec<String>,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RolePermissionSummary {
+    pub name: String,
+    pub description: String,
+    pub paths: Vec<String>,
 }
 
 pub fn www_authenticate(res: &mut Response, args: &Args) -> Result<()> {
@@ -749,5 +991,79 @@ mod tests {
             paths.find("dir2/dir23//dir231/file"),
             Some(AccessPaths::new(AccessPerm::ReadWrite))
         );
+    }
+
+    #[test]
+    fn test_access_paths_permission_info() {
+        let mut paths = AccessPaths::default();
+        paths.add("/team", AccessPerm::ReadOnly);
+        paths.add("/team/uploads", AccessPerm::ReadWrite);
+
+        assert_eq!(
+            paths
+                .find("team")
+                .map(|v| v.permission_info().access)
+                .as_deref(),
+            Some("read-only")
+        );
+        assert_eq!(
+            paths
+                .find("team")
+                .and_then(|v| v.child_permission_info("uploads"))
+                .map(|v| v.role)
+                .as_deref(),
+            Some("Editor")
+        );
+    }
+
+    #[test]
+    fn test_business_auth_config() {
+        let mut config = BusinessAuthConfig::default();
+        config.roles.insert(
+            "editor".to_string(),
+            BusinessRoleConfig {
+                description: "Can edit team files".to_string(),
+                paths: vec!["/team:rw".to_string()],
+            },
+        );
+        config.groups.insert(
+            "team".to_string(),
+            BusinessGroupConfig {
+                members: vec!["alice".to_string()],
+                paths: vec!["/shared".to_string()],
+                roles: vec!["editor".to_string()],
+            },
+        );
+        config.users.insert(
+            "alice".to_string(),
+            BusinessUserConfig {
+                password: "pass".to_string(),
+                groups: vec!["team".to_string()],
+                admin: true,
+                ..Default::default()
+            },
+        );
+
+        let access = AccessControl::new_business(config).unwrap();
+        assert!(access.is_admin(Some("alice")));
+        assert!(access.permission_overview(Some("alice")).is_some());
+
+        let (_, paths) = access.guard(
+            "/team/file.txt",
+            &Method::PUT,
+            Some(&HeaderValue::from_static("Basic YWxpY2U6cGFzcw==")),
+            None,
+            false,
+        );
+        assert!(paths.unwrap().perm().readwrite());
+
+        let (_, paths) = access.guard(
+            "/shared/file.txt",
+            &Method::GET,
+            Some(&HeaderValue::from_static("Basic YWxpY2U6cGFzcw==")),
+            None,
+            false,
+        );
+        assert_eq!(paths.unwrap().perm(), AccessPerm::ReadOnly);
     }
 }

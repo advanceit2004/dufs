@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::auth::{www_authenticate, AccessPaths, AccessPerm};
+use crate::auth::{www_authenticate, AccessPaths, AccessPerm, PermissionInfo, PermissionOverview};
 use crate::http_utils::{body_full, IncomingStream, LengthLimitedStream};
 use crate::noscript::{detect_noscript, generate_noscript_html};
 use crate::utils::{decode_uri, encode_uri, get_file_name, glob, parse_range, try_get_file_name};
@@ -1294,6 +1294,11 @@ impl Server {
             normalize_path(path.strip_prefix(&self.args.serve_path)?)
         );
         let readwrite = access_paths.perm().readwrite();
+        for item in &mut paths {
+            item.permission = access_paths.child_permission_info(&item.name);
+        }
+        let is_admin = self.args.auth.is_admin(user.as_deref());
+        let permissions = self.args.auth.permission_overview(user.as_deref());
         let data = IndexData {
             kind: DataKind::Index,
             href,
@@ -1305,6 +1310,9 @@ impl Server {
             dir_exists: exist,
             auth: self.args.auth.has_users(),
             user,
+            current_permission: access_paths.permission_info(),
+            is_admin,
+            permissions,
             paths,
         };
         let output = if has_query_flag(query_params, "json") {
@@ -1541,6 +1549,7 @@ impl Server {
             name,
             mtime,
             size,
+            permission: None,
         }))
     }
 }
@@ -1564,6 +1573,10 @@ pub struct IndexData {
     pub dir_exists: bool,
     pub auth: bool,
     pub user: Option<String>,
+    pub current_permission: PermissionInfo,
+    pub is_admin: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<PermissionOverview>,
     pub paths: Vec<PathItem>,
 }
 
@@ -1573,6 +1586,8 @@ pub struct PathItem {
     pub name: String,
     pub mtime: u64,
     pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission: Option<PermissionInfo>,
 }
 
 impl PathItem {

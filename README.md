@@ -247,6 +247,34 @@ dufs -a user:pass@/:rw,/dir1 -a @/
 
 **Auth permissions are restricted by dufs global permissions.** If dufs does not enable upload permissions via `--allow-upload`, then the account will not have upload permissions even if it is granted `read-write`(`:rw`) permissions.
 
+For team-oriented deployments, the config file also supports a structured auth form with users, groups, roles, and admins. This keeps the existing path permission syntax while making subdirectory access easier to manage:
+
+```yaml
+auth:
+  admins:
+    - alice
+  roles:
+    team-editor:
+      description: Can edit team folders
+      paths:
+        - /team:rw
+  groups:
+    designers:
+      members:
+        - alice
+      paths:
+        - /brand
+      roles:
+        - team-editor
+  users:
+    alice:
+      password: pass
+      groups:
+        - designers
+```
+
+Admins see an additional permission overview in the Web UI. Directory pages also expose effective permission metadata for the current directory and visible child paths.
+
 #### Hashed Password
 
 DUFS supports the use of sha-512 hashed password.

@@ -459,7 +459,11 @@ impl AccessPaths {
             if perm.indexonly() {
                 return Some(self.clone());
             } else {
-                return Some(AccessPaths::new(perm));
+                let mut target = self.clone();
+                if target.perm.indexonly() {
+                    target.perm = perm;
+                }
+                return Some(target);
             }
         }
         let child = match self.children.get(parts[0]) {
@@ -526,7 +530,7 @@ impl AccessPerm {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PermissionInfo {
     pub access: String,
     pub role: String,

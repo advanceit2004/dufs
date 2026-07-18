@@ -6,6 +6,8 @@ use fixtures::{port, server, tmpdir, wait_for_port, Error, TestServer, DIR_ASSET
 use rstest::rstest;
 use std::process::{Command, Stdio};
 
+const ASSETS_INDEX_JS_REL_PATH: &str = "assets/index.js";
+
 #[rstest]
 fn assets(server: TestServer) -> Result<(), Error> {
     let ver = env!("CARGO_PKG_VERSION");
@@ -39,7 +41,11 @@ fn asset_js(server: TestServer) -> Result<(), Error> {
 
 #[test]
 fn asset_js_permission_class_whitelist() {
-    let path = format!("{}/assets/index.js", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        ASSETS_INDEX_JS_REL_PATH
+    );
     let text = std::fs::read_to_string(path).expect("read assets/index.js");
 
     assert!(text.contains("function permissionClass(access)"));
@@ -47,9 +53,15 @@ fn asset_js_permission_class_whitelist() {
     assert!(text.contains("return \"\";"));
     assert!(text.contains("permissionClass(permission.access)"));
     assert!(text.contains("permissionClass(file.permission.access)"));
-    assert!(!text.contains("permission-${"));
-    assert!(!text.contains("\"permission-\" +"));
-    assert!(!text.contains("'permission-' +"));
+
+    let forbidden_dynamic_class_patterns =
+        ["permission-${", "\"permission-\" +", "'permission-' +"];
+    assert!(
+        forbidden_dynamic_class_patterns
+            .iter()
+            .all(|pattern| !text.contains(pattern)),
+        "assets/index.js must not construct permission classes dynamically"
+    );
 }
 
 #[rstest]

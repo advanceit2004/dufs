@@ -4,6 +4,14 @@ on:
   push:
     tags:
     - v[0-9]+.[0-9]+.[0-9]+*
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag name (for example v0.46.0-rc2)"
+        required: true
+      ref:
+        description: "Git ref to build from (branch, tag, or commit SHA)"
+        required: false
 
 jobs:
   release:
@@ -53,14 +61,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
 
     - name: Check Tag
       id: check-tag
       shell: bash
       run: |
-        ver=${GITHUB_REF##*/}
+        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          ver="${{ github.event.inputs.version }}"
+        else
+          ver=${GITHUB_REF##*/}
+        fi
         echo "version=$ver" >> $GITHUB_OUTPUT
-        if [[ "$ver" =~ [0-9]+.[0-9]+.[0-9]+$ ]]; then
+        if [[ "$ver" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           echo "rc=false" >> $GITHUB_OUTPUT
         else
           echo "rc=true" >> $GITHUB_OUTPUT
@@ -131,9 +145,11 @@ jobs:
 
     - name: Publish Archive
       uses: softprops/action-gh-release@v2
-      if: ${{ startsWith(github.ref, 'refs/tags/') }}
+      if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
       with:
         draft: false
+        tag_name: ${{ steps.check-tag.outputs.version }}
+        target_commitish: ${{ github.sha }}
         files: ${{ steps.package.outputs.archive }}
         prerelease: ${{ steps.check-tag.outputs.rc == 'true' }}
 

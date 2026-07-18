@@ -68,13 +68,13 @@ jobs:
       id: check-tag
       shell: bash
       run: |
-        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+        if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
           ver="${{ github.event.inputs.version }}"
         else
           ver=${GITHUB_REF##*/}
         fi
         echo "version=$ver" >> $GITHUB_OUTPUT
-        if [[ "$ver" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ "$ver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           echo "rc=false" >> $GITHUB_OUTPUT
         else
           echo "rc=true" >> $GITHUB_OUTPUT

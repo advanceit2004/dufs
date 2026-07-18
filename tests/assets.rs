@@ -43,11 +43,13 @@ fn asset_js_permission_class_whitelist() {
     let text = std::fs::read_to_string(path).expect("read assets/index.js");
 
     assert!(text.contains("function permissionClass(access)"));
-    assert!(text.contains("default:\n      return \"\";"));
+    assert!(text.contains("default:"));
+    assert!(text.contains("return \"\";"));
     assert!(text.contains("permissionClass(permission.access)"));
     assert!(text.contains("permissionClass(file.permission.access)"));
-    assert!(!text.contains("permission-${permission.access}"));
-    assert!(!text.contains("permission-${file.permission.access}"));
+    assert!(!text.contains("permission-${"));
+    assert!(!text.contains("\"permission-\" +"));
+    assert!(!text.contains("'permission-' +"));
 }
 
 #[rstest]

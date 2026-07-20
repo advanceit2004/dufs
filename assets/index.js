@@ -18,9 +18,6 @@
  * @property {boolean} allow_archive
  * @property {boolean} auth
  * @property {string} user
- * @property {{access: string, role: string, can_read: boolean, can_write: boolean}} current_permission
- * @property {boolean} is_admin
- * @property {{users: Array<object>, groups: Array<object>, roles: Array<object>}=} permissions
  * @property {boolean} dir_exists
  * @property {string} editable
  */
@@ -95,10 +92,6 @@ let $emptyFolder;
 /**
  * @type Element
  */
-let $permissionPanel;
-/**
- * @type Element
- */
 let $editor;
 /**
  * @type Element
@@ -142,7 +135,6 @@ async function ready() {
   $pathsTableBody = document.querySelector(".paths-table tbody");
   $uploadersTable = document.querySelector(".uploaders-table");
   $emptyFolder = document.querySelector(".empty-folder");
-  $permissionPanel = document.querySelector(".permission-panel");
   $editor = document.querySelector(".editor");
   $loginBtn = document.querySelector(".login-btn");
   $logoutBtn = document.querySelector(".logout-btn");
@@ -364,83 +356,12 @@ function addBreadcrumb(href, uri_prefix) {
 }
 
 async function setupIndexPage() {
-  renderPermissionPanel();
-
   if (DATA.allow_archive) {
     const $download = document.querySelector(".download");
     $download.href = baseUrl() + "?zip";
     $download.title = "Download folder as a .zip file";
     $download.classList.add("dlwt");
     $download.classList.remove("hidden");
-  }
-
-  function renderPermissionPanel() {
-    if (!DATA.current_permission) {
-      return;
-    }
-    const permission = DATA.current_permission;
-    const badges = [
-      `<span class="permission-badge ${permissionClass(permission.access)}">${encodedStr(permission.role)}</span>`,
-      DATA.user ? `<span>Signed in as <b>${encodedStr(DATA.user)}</b></span>` : `<span>Anonymous access</span>`,
-      `<span>${permission.can_write ? "Can manage files here" : permission.can_read ? "Read-only folder" : "Limited folder index"}</span>`,
-    ];
-    let adminPanel = "";
-    if (DATA.is_admin && DATA.permissions) {
-      adminPanel = renderAdminPermissionOverview(DATA.permissions);
-    }
-    $permissionPanel.innerHTML = `
-      <div class="permission-summary">
-        ${badges.join("")}
-      </div>
-      ${adminPanel}
-    `;
-    $permissionPanel.classList.remove("hidden");
-  }
-
-  function renderAdminPermissionOverview(permissions) {
-    const overview = permissions && typeof permissions === "object" ? permissions : {};
-    const users = Array.isArray(overview.users) ? overview.users : [];
-    const groups = Array.isArray(overview.groups) ? overview.groups : [];
-    const roles = Array.isArray(overview.roles) ? overview.roles : [];
-    return `
-      <details class="admin-permissions">
-        <summary>Permission management overview</summary>
-        <div class="permission-grid">
-          <div>
-            <h3>Users</h3>
-            ${users.length ? users.map(user => `
-              <div class="permission-card">
-                <b>${encodedStr(user.name)}</b>${user.admin ? ` <span class="permission-badge permission-read-write">Admin</span>` : ""}
-                <div>Groups: ${encodedStr((user.groups || []).join(", ") || "-")}</div>
-                <div>Roles: ${encodedStr((user.roles || []).join(", ") || "-")}</div>
-                <div>Paths: ${encodedStr((user.paths || []).join(", ") || "-")}</div>
-              </div>
-            `).join("") : `<div class="permission-muted">No configured users</div>`}
-          </div>
-          <div>
-            <h3>Groups</h3>
-            ${groups.length ? groups.map(group => `
-              <div class="permission-card">
-                <b>${encodedStr(group.name)}</b>
-                <div>Members: ${encodedStr((group.members || []).join(", ") || "-")}</div>
-                <div>Roles: ${encodedStr((group.roles || []).join(", ") || "-")}</div>
-                <div>Paths: ${encodedStr((group.paths || []).join(", ") || "-")}</div>
-              </div>
-            `).join("") : `<div class="permission-muted">No configured groups</div>`}
-          </div>
-          <div>
-            <h3>Roles</h3>
-            ${roles.length ? roles.map(role => `
-              <div class="permission-card">
-                <b>${encodedStr(role.name)}</b>
-                <div>${encodedStr(role.description || "")}</div>
-                <div>Paths: ${encodedStr((role.paths || []).join(", ") || "-")}</div>
-              </div>
-            `).join("") : `<div class="permission-muted">No configured roles</div>`}
-          </div>
-        </div>
-      </details>
-    `;
   }
 
   if (DATA.allow_upload) {
@@ -578,9 +499,6 @@ function addPath(file, index) {
   </td>`;
 
   let sizeDisplay = isDir ? formatDirSize(file.size) : formatFileSize(file.size).join(" ");
-  const permissionBadge = file.permission
-    ? `<span class="path-permission permission-badge ${permissionClass(file.permission.access)}" title="${encodedStr(file.permission.access)}">${encodedStr(file.permission.role)}</span>`
-    : "";
 
   $pathsTableBody.insertAdjacentHTML("beforeend", `
 <tr id="addPath${index}">
@@ -588,25 +506,12 @@ function addPath(file, index) {
     ${getPathSvg(file.path_type)}
   </td>
   <td class="path cell-name">
-    <a href="${url}" ${isDir ? "" : `target="_blank"`}>${encodedName}</a>${permissionBadge}
+    <a href="${url}" ${isDir ? "" : `target="_blank"`}>${encodedName}</a>
   </td>
   <td class="cell-mtime">${formatMtime(file.mtime)}</td>
   <td class="cell-size">${sizeDisplay}</td>
   ${actionCell}
 </tr>`);
-}
-
-function permissionClass(access) {
-  switch (access) {
-    case "read-write":
-      return "permission-read-write";
-    case "read-only":
-      return "permission-read-only";
-    case "limited":
-      return "permission-limited";
-    default:
-      return "";
-  }
 }
 
 function setupDropzone() {

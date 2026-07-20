@@ -275,6 +275,13 @@ auth:
 
 Admins see an additional permission overview in the Web UI. Directory pages also expose effective permission metadata for the current directory and visible child paths.
 
+To get started quickly, generate an annotated starter config (or copy [example-config.yaml](./example-config.yaml)):
+
+```
+dufs --gen-config > config.yaml
+dufs --config config.yaml
+```
+
 #### Hashed Password
 
 DUFS supports the use of sha-512 hashed password.

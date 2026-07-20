@@ -443,6 +443,8 @@ function addBreadcrumb(href, uri_prefix) {
 }
 
 async function setupIndexPage() {
+  renderPermissionPanel();
+
   if (DATA.allow_archive) {
     const $download = document.querySelector(".download");
     $download.href = baseUrl() + "?zip";
@@ -471,6 +473,152 @@ async function setupIndexPage() {
 
   if (DATA.user) {
     setupDownloadWithToken();
+  }
+}
+
+/**
+ * Render the current user's access summary and, for admins, the permission overview.
+ * All values are rendered via textContent — never innerHTML — since names,
+ * groups, roles and paths are user-controlled configuration data.
+ */
+function renderPermissionPanel() {
+  const $panel = document.querySelector(".permission-panel");
+  if (!$panel || !DATA.current_permission) {
+    return;
+  }
+  $panel.replaceChildren();
+
+  const permission = DATA.current_permission;
+  const $summary = document.createElement("div");
+  $summary.className = "permission-summary";
+  $summary.appendChild(createPermissionBadge(permission));
+
+  const $who = document.createElement("span");
+  if (DATA.user) {
+    $who.append("Signed in as ");
+    const $name = document.createElement("b");
+    $name.textContent = DATA.user;
+    $who.appendChild($name);
+  } else {
+    $who.textContent = "Anonymous access";
+  }
+  $summary.appendChild($who);
+
+  const $hint = document.createElement("span");
+  $hint.textContent = permission.can_write
+    ? "Can manage files here"
+    : permission.can_read
+      ? "Read-only folder"
+      : "Limited folder index";
+  $summary.appendChild($hint);
+
+  $panel.appendChild($summary);
+
+  if (DATA.is_admin && DATA.permissions) {
+    $panel.appendChild(renderAdminPermissionOverview(DATA.permissions));
+  }
+
+  $panel.classList.remove("hidden");
+}
+
+/**
+ * Build a permission badge element using only whitelisted CSS classes.
+ */
+function createPermissionBadge(permission, extraClass) {
+  const $badge = document.createElement("span");
+  $badge.className = ["permission-badge", permissionClass(permission.access), extraClass]
+    .filter(Boolean)
+    .join(" ");
+  $badge.title = permission.access;
+  $badge.textContent = permission.role;
+  return $badge;
+}
+
+function renderAdminPermissionOverview(permissions) {
+  const overview = permissions && typeof permissions === "object" ? permissions : {};
+  const users = Array.isArray(overview.users) ? overview.users : [];
+  const groups = Array.isArray(overview.groups) ? overview.groups : [];
+  const roles = Array.isArray(overview.roles) ? overview.roles : [];
+
+  const $details = document.createElement("details");
+  $details.className = "admin-permissions";
+  const $summary = document.createElement("summary");
+  $summary.textContent = "Permission management overview";
+  $details.appendChild($summary);
+
+  const $grid = document.createElement("div");
+  $grid.className = "permission-grid";
+  $grid.appendChild(permissionColumn("Users", users, user => {
+    const $card = permissionCard(user.name, [
+      ["Groups", (user.groups || []).join(", ") || "-"],
+      ["Roles", (user.roles || []).join(", ") || "-"],
+      ["Paths", (user.paths || []).join(", ") || "-"],
+    ]);
+    if (user.admin) {
+      const $adminBadge = createPermissionBadge({ access: "read-write", role: "Admin" });
+      $card.firstChild.appendChild($adminBadge);
+    }
+    return $card;
+  }));
+  $grid.appendChild(permissionColumn("Groups", groups, group => permissionCard(group.name, [
+    ["Members", (group.members || []).join(", ") || "-"],
+    ["Roles", (group.roles || []).join(", ") || "-"],
+    ["Paths", (group.paths || []).join(", ") || "-"],
+  ])));
+  $grid.appendChild(permissionColumn("Roles", roles, role => permissionCard(role.name, [
+    ["Description", role.description || "-"],
+    ["Paths", (role.paths || []).join(", ") || "-"],
+  ])));
+  $details.appendChild($grid);
+  return $details;
+}
+
+function permissionColumn(title, items, renderItem) {
+  const $column = document.createElement("div");
+  const $heading = document.createElement("h3");
+  $heading.textContent = title;
+  $column.appendChild($heading);
+  if (!items.length) {
+    const $empty = document.createElement("div");
+    $empty.className = "permission-muted";
+    $empty.textContent = `No configured ${title.toLowerCase()}`;
+    $column.appendChild($empty);
+  } else {
+    for (const item of items) {
+      $column.appendChild(renderItem(item));
+    }
+  }
+  return $column;
+}
+
+function permissionCard(name, rows) {
+  const $card = document.createElement("div");
+  $card.className = "permission-card";
+  const $title = document.createElement("b");
+  $title.textContent = name;
+  $card.appendChild($title);
+  for (const [label, value] of rows) {
+    const $row = document.createElement("div");
+    $row.textContent = `${label}: ${value}`;
+    $card.appendChild($row);
+  }
+  return $card;
+}
+
+/**
+ * Whitelist mapping of permission access values to CSS classes.
+ * Never construct permission classes dynamically from server data.
+ */
+function permissionClass(access) {
+  switch (access) {
+    case "read-write":
+      return "permission-read-write";
+    case "read-only":
+      return "permission-read-only";
+    case "limited":
+      return "permission-limited";
+    default:
+      return "";
   }
 }
 
@@ -565,6 +713,9 @@ function addPath(file, index) {
   }
   $link.textContent = file.name;
   $nameCell.appendChild($link);
+  if (file.permission) {
+    $nameCell.appendChild(createPermissionBadge(file.permission, "path-permission"));
+  }
 
   const $mtimeCell = document.createElement("td");
   $mtimeCell.className = "cell-mtime";

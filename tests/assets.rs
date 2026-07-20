@@ -6,7 +6,7 @@ use fixtures::{port, server, tmpdir, wait_for_port, Error, TestServer, DIR_ASSET
 use rstest::rstest;
 use std::process::{Command, Stdio};
 
-const ASSETS_INDEX_JS_REL_PATH: &str = "assets/index.js";
+const ASSETS_INDEX_JS_REL_PATH: &str = "webui/custom/index.js";
 
 #[rstest]
 fn assets(server: TestServer) -> Result<(), Error> {
@@ -46,13 +46,13 @@ fn asset_js_permission_class_whitelist() {
         env!("CARGO_MANIFEST_DIR"),
         ASSETS_INDEX_JS_REL_PATH
     );
-    let text = std::fs::read_to_string(path).expect("read assets/index.js");
+    let text = std::fs::read_to_string(path).expect("read webui/custom/index.js");
 
     assert!(text.contains("function permissionClass(access)"));
     assert!(text.contains("default:"));
     assert!(text.contains("return \"\";"));
     assert!(text.contains("permissionClass(permission.access)"));
-    assert!(text.contains("permissionClass(file.permission.access)"));
+    assert!(text.contains("createPermissionBadge(file.permission"));
 
     let forbidden_dynamic_class_patterns =
         ["permission-${", "\"permission-\" +", "'permission-' +"];
@@ -60,7 +60,7 @@ fn asset_js_permission_class_whitelist() {
         forbidden_dynamic_class_patterns
             .iter()
             .all(|pattern| !text.contains(pattern)),
-        "assets/index.js must not construct permission classes dynamically"
+        "webui/custom/index.js must not construct permission classes dynamically"
     );
 }
 

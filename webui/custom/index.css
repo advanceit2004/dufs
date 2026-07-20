@@ -527,3 +527,98 @@ button:focus-visible,
   --border-secondary: #30363d;
   --shadow-elevated: 0 10px 30px rgba(1, 4, 9, 0.55);
 }
+.permission-panel {
+  margin: 0.5em 0 1em;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.permission-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  align-items: center;
+  padding: 0.6em 0.8em;
+}
+
+.permission-badge {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0.05em 0.45em;
+  border-radius: 999px;
+  border: 1px solid var(--border-secondary);
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.permission-read-write {
+  color: #116329;
+  background: #dafbe1;
+}
+
+.permission-read-only {
+  color: #0969da;
+  background: #ddf4ff;
+}
+
+.permission-limited {
+  color: #9a6700;
+  background: #fff8c5;
+}
+
+[data-theme="dark"] .permission-read-write {
+  color: #3fb950;
+  background: rgba(46, 160, 67, 0.15);
+}
+
+[data-theme="dark"] .permission-read-only {
+  color: #58a6ff;
+  background: rgba(56, 139, 253, 0.15);
+}
+
+[data-theme="dark"] .permission-limited {
+  color: #d29922;
+  background: rgba(187, 128, 9, 0.15);
+}
+
+.admin-permissions {
+  padding: 0 0.8em 0.8em;
+}
+
+.admin-permissions summary {
+  cursor: pointer;
+  color: var(--text-accent);
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8em;
+  margin-top: 0.6em;
+}
+
+@media (max-width: 768px) {
+  .permission-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.permission-card {
+  margin: 0.4em 0;
+  padding: 0.5em;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  font-size: 0.9em;
+}
+
+.permission-muted {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.path-permission {
+  vertical-align: middle;
+}

@@ -1003,6 +1003,44 @@ mod tests {
     }
 
     #[test]
+    fn test_access_paths_find_preserves_descendants_without_widening() {
+        let mut paths = AccessPaths::default();
+        paths.add("/", AccessPerm::ReadOnly);
+        paths.add("/team/uploads", AccessPerm::ReadWrite);
+
+        // Inherited read-only is materialized on the intermediate node...
+        let team = paths.find("team").unwrap();
+        assert_eq!(team.perm(), AccessPerm::ReadOnly);
+        // ...without dropping the explicit read-write descendant grant.
+        assert_eq!(team.find("uploads").unwrap().perm(), AccessPerm::ReadWrite);
+        // Unlisted siblings only inherit read-only.
+        assert_eq!(
+            paths.find("team/other").unwrap().perm(),
+            AccessPerm::ReadOnly
+        );
+        assert_eq!(
+            paths.find("team/uploads/deep").unwrap().perm(),
+            AccessPerm::ReadWrite
+        );
+    }
+
+    #[test]
+    fn test_access_paths_find_never_widens_explicit_narrower_grant() {
+        let mut paths = AccessPaths::default();
+        paths.add("/", AccessPerm::ReadWrite);
+        paths.add("/restricted", AccessPerm::ReadOnly);
+
+        assert_eq!(
+            paths.find("restricted").unwrap().perm(),
+            AccessPerm::ReadOnly
+        );
+        assert_eq!(
+            paths.find("restricted/deep").unwrap().perm(),
+            AccessPerm::ReadOnly
+        );
+    }
+
+    #[test]
     fn test_access_paths_permission_info() {
         let mut paths = AccessPaths::default();
         paths.add("/team", AccessPerm::ReadOnly);

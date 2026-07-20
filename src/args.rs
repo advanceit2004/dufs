@@ -767,6 +767,8 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         ))
         .expect("read example-config.yaml");
+        // Normalize line endings so the test passes on Windows (git autocrlf)
+        let example = example.replace("\r\n", "\n");
         assert_eq!(
             example, STARTER_CONFIG,
             "example-config.yaml must stay in sync with args::STARTER_CONFIG"

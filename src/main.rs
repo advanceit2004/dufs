@@ -1,19 +1,10 @@
-mod args;
-mod auth;
-mod http_logger;
-mod http_utils;
-mod logger;
-mod noscript;
-mod server;
-mod utils;
-
-#[macro_use]
-extern crate log;
-
-use crate::args::{build_cli, print_completions, Args};
-use crate::server::Server;
+use dufs::args::{self, build_cli, print_completions, Args};
+use dufs::logger;
+use dufs::server::Server;
 #[cfg(feature = "tls")]
-use crate::utils::{load_certs, load_private_key};
+use dufs::utils::{load_certs, load_private_key};
+
+use log::error;
 
 use anyhow::{anyhow, Context, Result};
 use args::BindAddr;
@@ -43,6 +34,10 @@ async fn main() -> Result<()> {
     if let Some(generator) = matches.get_one::<Shell>("completions") {
         let mut cmd = build_cli();
         print_completions(*generator, &mut cmd);
+        return Ok(());
+    }
+    if matches.get_flag("gen-config") {
+        print!("{}", args::STARTER_CONFIG);
         return Ok(());
     }
     let mut args = Args::parse(matches)?;

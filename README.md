@@ -247,6 +247,41 @@ dufs -a user:pass@/:rw,/dir1 -a @/
 
 **Auth permissions are restricted by dufs global permissions.** If dufs does not enable upload permissions via `--allow-upload`, then the account will not have upload permissions even if it is granted `read-write`(`:rw`) permissions.
 
+For team-oriented deployments, the config file also supports a structured auth form with users, groups, roles, and admins. This keeps the existing path permission syntax while making subdirectory access easier to manage:
+
+```yaml
+auth:
+  admins:
+    - alice
+  roles:
+    team-editor:
+      description: Can edit team folders
+      paths:
+        - /team:rw
+  groups:
+    designers:
+      members:
+        - alice
+      paths:
+        - /brand
+      roles:
+        - team-editor
+  users:
+    alice:
+      password: pass
+      groups:
+        - designers
+```
+
+Admins see an additional permission overview in the Web UI. Directory pages also expose effective permission metadata for the current directory and visible child paths.
+
+To get started quickly, generate an annotated starter config (or copy [example-config.yaml](./example-config.yaml)):
+
+```
+dufs --gen-config > config.yaml
+dufs --config config.yaml
+```
+
 #### Hashed Password
 
 DUFS supports the use of sha-512 hashed password.
@@ -423,6 +458,20 @@ Your assets folder must contains a `index.html` file.
 - `__ASSETS_PREFIX__`: assets url prefix
 
 > A customized 404.html page is also supported.
+
+This fork embeds the maintained custom WebUI from `webui/custom` into normal releases while keeping upstream's `--assets` override behavior. You can also run the same WebUI against any compatible dufs binary:
+
+```
+dufs --assets webui/custom
+```
+
+Keeping the fork WebUI in `webui/custom` reduces conflicts when syncing upstream updates to the original `assets` directory.
+
+The fork WebUI additionally provides:
+
+- **Permission visibility** — per-file access badges (Viewer/Editor/Limited), a current-access summary, and an admin-only permission overview panel
+- **File management** — multi-select with shift-click ranges, bulk delete/move, inline rename (F2), and keyboard shortcuts (`/` search, `Esc` clear, `Del` delete, `Ctrl/Cmd+A` select all)
+- **Document preview** (`?view`) — rendered Markdown, CSV/TSV tables, Excel workbooks (per-sheet tabs), and paginated Word documents, alongside the existing PDF/image/media preview. Preview libraries are embedded in the binary and lazy-loaded only when a matching file is opened; the release stays a single file and works fully offline. Adding a format is one entry in `PREVIEW_HANDLERS` (webui/custom/index.js) plus a vendored library under `webui/custom/vendor/`.
 
 Here are some Third-party customize UI project:
 

@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::auth::{www_authenticate, AccessPaths, AccessPerm};
+use crate::auth::{www_authenticate, AccessPaths, AccessPerm, PermissionInfo, PermissionOverview};
 use crate::http_utils::{body_full, IncomingStream, LengthLimitedStream};
 use crate::noscript::{detect_noscript, generate_noscript_html};
 use crate::utils::{decode_uri, encode_uri, get_file_name, glob, parse_range, try_get_file_name};
@@ -51,10 +51,16 @@ use xml::escape::escape_str_pcdata;
 pub type Request = hyper::Request<Incoming>;
 pub type Response = hyper::Response<BoxBody<Bytes, anyhow::Error>>;
 
-const INDEX_HTML: &str = include_str!("../assets/index.html");
-const INDEX_CSS: &str = include_str!("../assets/index.css");
-const INDEX_JS: &str = include_str!("../assets/index.js");
-const FAVICON_ICO: &[u8] = include_bytes!("../assets/favicon.ico");
+const INDEX_HTML: &str = include_str!("../webui/custom/index.html");
+const INDEX_CSS: &str = include_str!("../webui/custom/index.css");
+const INDEX_JS: &str = include_str!("../webui/custom/index.js");
+const FAVICON_ICO: &[u8] = include_bytes!("../webui/custom/favicon.ico");
+// Lazy-loaded preview libraries; each is fetched by the webui only when a
+// matching file type is actually opened.
+const VENDOR_MARKED_JS: &str = include_str!("../webui/custom/vendor/marked.min.js");
+const VENDOR_XLSX_JS: &str = include_str!("../webui/custom/vendor/xlsx.full.min.js");
+const VENDOR_JSZIP_JS: &str = include_str!("../webui/custom/vendor/jszip.min.js");
+const VENDOR_DOCX_PREVIEW_JS: &str = include_str!("../webui/custom/vendor/docx-preview.min.js");
 const INDEX_NAME: &str = "index.html";
 const BUF_SIZE: usize = 65536;
 const EDITABLE_TEXT_MAX_SIZE: u64 = 4194304; // 4M
@@ -828,6 +834,22 @@ impl Server {
                         res.headers_mut()
                             .insert("content-type", HeaderValue::from_static("image/x-icon"));
                     }
+                    "vendor/marked.min.js"
+                    | "vendor/xlsx.full.min.js"
+                    | "vendor/jszip.min.js"
+                    | "vendor/docx-preview.min.js" => {
+                        let body = match name {
+                            "vendor/marked.min.js" => VENDOR_MARKED_JS,
+                            "vendor/xlsx.full.min.js" => VENDOR_XLSX_JS,
+                            "vendor/jszip.min.js" => VENDOR_JSZIP_JS,
+                            _ => VENDOR_DOCX_PREVIEW_JS,
+                        };
+                        *res.body_mut() = body_full(body);
+                        res.headers_mut().insert(
+                            "content-type",
+                            HeaderValue::from_static("application/javascript; charset=UTF-8"),
+                        );
+                    }
                     _ => {
                         status_not_found(res);
                     }
@@ -1294,6 +1316,11 @@ impl Server {
             normalize_path(path.strip_prefix(&self.args.serve_path)?)
         );
         let readwrite = access_paths.perm().readwrite();
+        for item in &mut paths {
+            item.permission = access_paths.child_permission_info(&item.name);
+        }
+        let is_admin = self.args.auth.is_admin(user.as_deref());
+        let permissions = self.args.auth.permission_overview(user.as_deref());
         let data = IndexData {
             kind: DataKind::Index,
             href,
@@ -1305,6 +1332,9 @@ impl Server {
             dir_exists: exist,
             auth: self.args.auth.has_users(),
             user,
+            current_permission: access_paths.permission_info(),
+            is_admin,
+            permissions,
             paths,
         };
         let output = if has_query_flag(query_params, "json") {
@@ -1541,6 +1571,7 @@ impl Server {
             name,
             mtime,
             size,
+            permission: None,
         }))
     }
 }
@@ -1564,15 +1595,21 @@ pub struct IndexData {
     pub dir_exists: bool,
     pub auth: bool,
     pub user: Option<String>,
+    pub current_permission: PermissionInfo,
+    pub is_admin: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<PermissionOverview>,
     pub paths: Vec<PathItem>,
 }
 
-#[derive(Debug, Serialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Serialize, Eq, PartialEq)]
 pub struct PathItem {
     pub path_type: PathType,
     pub name: String,
     pub mtime: u64,
     pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission: Option<PermissionInfo>,
 }
 
 impl PathItem {

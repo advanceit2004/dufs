@@ -1,0 +1,1785 @@
+/**
+ * @typedef {object} PathItem
+ * @property {"Dir"|"SymlinkDir"|"File"|"SymlinkFile"} path_type
+ * @property {string} name
+ * @property {number} mtime
+ * @property {number} size
+ */
+
+/**
+ * @typedef {object} DATA
+ * @property {string} href
+ * @property {string} uri_prefix
+ * @property {"Index" | "Edit" | "View"} kind
+ * @property {PathItem[]} paths
+ * @property {boolean} allow_upload
+ * @property {boolean} allow_delete
+ * @property {boolean} allow_search
+ * @property {boolean} allow_archive
+ * @property {boolean} auth
+ * @property {string} user
+ * @property {boolean} dir_exists
+ * @property {string} editable
+ */
+
+var DUFS_MAX_UPLOADINGS = 1;
+
+/**
+ * @type {DATA} DATA
+ */
+var DATA;
+
+/**
+ * @type {string}
+ */
+var DIR_EMPTY_NOTE;
+
+/**
+ * @type {PARAMS}
+ * @typedef {object} PARAMS
+ * @property {string} q
+ * @property {string} sort
+ * @property {string} order
+ */
+const PARAMS = Object.fromEntries(new URLSearchParams(window.location.search).entries());
+
+const THEME_STORAGE_KEY = "dufs-theme";
+
+const IFRAME_FORMATS = [
+  ".pdf",
+  ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg",
+  ".mp4", ".mov", ".avi", ".wmv", ".flv", ".webm",
+  ".mp3", ".ogg", ".wav", ".m4a",
+];
+
+/**
+ * Pluggable preview registry. Adding a format = one entry here plus, if
+ * needed, one vendored library under webui/custom/vendor/ (served by the
+ * binary and lazy-loaded only when a matching file is opened).
+ */
+const PREVIEW_HANDLERS = [
+  { exts: IFRAME_FORMATS, libs: [], render: renderIframePreview },
+  { exts: [".md", ".markdown"], libs: ["marked.min.js"], render: renderMarkdownPreview },
+  { exts: [".csv", ".tsv"], libs: [], render: renderCsvPreview },
+  { exts: [".xlsx", ".xls"], libs: ["xlsx.full.min.js"], render: renderSheetPreview },
+  { exts: [".docx"], libs: ["jszip.min.js", "docx-preview.min.js"], render: renderDocxPreview },
+  { exts: [".pptx", ".ppt"], libs: [], render: renderOfficeFallback },
+];
+
+const MAX_SUBPATHS_COUNT = 1000;
+
+const ICONS = {
+  dir: `<svg height="16" viewBox="0 0 14 16" width="14"><path fill-rule="evenodd" d="M13 4H7V3c0-.66-.31-1-1-1H1c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1zM6 4H1V3h5v1z"></path></svg>`,
+  symlinkFile: `<svg height="16" viewBox="0 0 12 16" width="12"><path fill-rule="evenodd" d="M8.5 1H1c-.55 0-1 .45-1 1v12c0 .55.45 1 1 1h10c.55 0 1-.45 1-1V4.5L8.5 1zM11 14H1V2h7l3 3v9zM6 4.5l4 3-4 3v-2c-.98-.02-1.84.22-2.55.7-.71.48-1.19 1.25-1.45 2.3.02-1.64.39-2.88 1.13-3.73.73-.84 1.69-1.27 2.88-1.27v-2H6z"></path></svg>`,
+  symlinkDir: `<svg height="16" viewBox="0 0 14 16" width="14"><path fill-rule="evenodd" d="M13 4H7V3c0-.66-.31-1-1-1H1c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1zM1 3h5v1H1V3zm6 9v-2c-.98-.02-1.84.22-2.55.7-.71.48-1.19 1.25-1.45 2.3.02-1.64.39-2.88 1.13-3.73C4.86 8.43 5.82 8 7.01 8V6l4 3-4 3H7z"></path></svg>`,
+  file: `<svg height="16" viewBox="0 0 12 16" width="12"><path fill-rule="evenodd" d="M6 5H2V4h4v1zM2 8h7V7H2v1zm0 2h7V9H2v1zm0 2h7v-1H2v1zm10-7.5V14c0 .55-.45 1-1 1H1c-.55 0-1-.45-1-1V2c0-.55.45-1 1-1h7.5L12 4.5zM11 5L8 2H1v12h10V5z"></path></svg>`,
+  download: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>`,
+  move: `<svg width="16" height="16" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.5 1.5A.5.5 0 0 0 1 2v4.8a2.5 2.5 0 0 0 2.5 2.5h9.793l-3.347 3.346a.5.5 0 0 0 .708.708l4.2-4.2a.5.5 0 0 0 0-.708l-4-4a.5.5 0 0 0-.708.708L13.293 8.3H3.5A1.5 1.5 0 0 1 2 6.8V2a.5.5 0 0 0-.5-.5z"/></svg>`,
+  edit: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>`,
+  delete: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.854 7.146a.5.5 0 1 0-.708.708L7.293 9l-1.147 1.146a.5.5 0 0 0 .708.708L8 9.707l1.146 1.147a.5.5 0 0 0 .708-.708L8.707 9l1.147-1.146a.5.5 0 0 0-.708-.708L8 8.293 6.854 7.146z"/><path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/></svg>`,
+  view: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1"/></svg>`,
+}
+
+/**
+ * @type Map<string, Uploader>
+ */
+const failUploaders = new Map();
+
+/**
+ * Indexes of currently selected rows in DATA.paths.
+ * @type Set<number>
+ */
+const selectedPaths = new Set();
+let lastCheckedIndex = null;
+
+/**
+ * @type Element
+ */
+let $pathsTable;
+/**
+ * @type Element
+ */
+let $pathsTableHead;
+/**
+ * @type Element
+ */
+let $pathsTableBody;
+/**
+ * @type Element
+ */
+let $uploadersTable;
+/**
+ * @type Element
+ */
+let $emptyFolder;
+/**
+ * @type Element
+ */
+let $editor;
+/**
+ * @type Element
+ */
+let $loginBtn;
+/**
+ * @type Element
+ */
+let $logoutBtn;
+/**
+ * @type Element
+ */
+let $userName;
+/**
+ * @type Element
+ */
+let $themeBtn;
+/**
+ * @type Element
+ */
+let $toast;
+/**
+ * @type Element
+ */
+let $dropHint;
+
+applyStoredTheme();
+
+// manage unload event to prevent leaving with uploads in progress
+const beforeUnloadHandler = (event) => {
+  if (Uploader.queues.length > 0 || Uploader.runnings > 0) {
+    event.preventDefault();
+    event.returnValue = '';
+    return ''; // for some browsers
+  }
+};
+
+// Produce table when window loads
+window.addEventListener("DOMContentLoaded", async () => {
+  const $indexData = document.getElementById('index-data');
+  if (!$indexData) {
+    notify("No data");
+    return;
+  }
+
+  DATA = JSON.parse(decodeBase64($indexData.innerHTML));
+  DIR_EMPTY_NOTE = PARAMS.q ? 'No results' : DATA.dir_exists ? 'Empty folder' : 'Folder will be created when a file is uploaded';
+
+  await ready();
+});
+
+async function ready() {
+  $pathsTable = document.querySelector(".paths-table");
+  $pathsTableHead = document.querySelector(".paths-table thead");
+  $pathsTableBody = document.querySelector(".paths-table tbody");
+  $uploadersTable = document.querySelector(".uploaders-table");
+  $emptyFolder = document.querySelector(".empty-folder");
+  $editor = document.querySelector(".editor");
+  $loginBtn = document.querySelector(".login-btn");
+  $logoutBtn = document.querySelector(".logout-btn");
+  $userName = document.querySelector(".user-name");
+  $themeBtn = document.querySelector(".theme-btn");
+  $toast = document.querySelector(".toast");
+  $dropHint = document.querySelector(".drop-hint");
+
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+  setupTheme();
+
+  addBreadcrumb(DATA.href, DATA.uri_prefix);
+
+  if (DATA.kind === "Index") {
+    document.title = `Index of ${DATA.href} - Dufs`;
+    document.querySelector(".index-page").classList.remove("hidden");
+
+    await setupIndexPage();
+  } else if (DATA.kind === "Edit") {
+    document.title = `Edit ${DATA.href} - Dufs`;
+    document.querySelector(".editor-page").classList.remove("hidden");
+
+    await setupEditorPage();
+  } else if (DATA.kind === "View") {
+    document.title = `View ${DATA.href} - Dufs`;
+    document.querySelector(".editor-page").classList.remove("hidden");
+
+    await setupEditorPage();
+  }
+}
+
+function applyStoredTheme() {
+  const theme = localStorage.getItem(THEME_STORAGE_KEY);
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+function setupTheme() {
+  if (!$themeBtn) return;
+  const isDarkPreferred = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const currentTheme = document.documentElement.dataset.theme || (isDarkPreferred ? "dark" : "light");
+  $themeBtn.title = `Theme: ${currentTheme}`;
+  $themeBtn.addEventListener("click", () => {
+    const nextTheme = (document.documentElement.dataset.theme || currentTheme) === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    $themeBtn.title = `Theme: ${nextTheme}`;
+    notify(`Switched to ${nextTheme} theme`);
+  });
+}
+
+function notify(message) {
+  const $target = $toast || document.querySelector(".toast");
+  if (!$target) {
+    alert(message);
+    return;
+  }
+  clearTimeout(notify.timer);
+  $target.textContent = message;
+  $target.classList.remove("hidden");
+  notify.timer = setTimeout(() => {
+    $target.classList.add("hidden");
+  }, 3200);
+}
+
+class Uploader {
+  /**
+   *
+   * @param {File} file
+   * @param {string[]} pathParts
+   */
+  constructor(file, pathParts) {
+    /**
+     * @type Element
+     */
+    this.$uploadStatus = null;
+    this.uploaded = 0;
+    this.uploadOffset = 0;
+    this.lastUptime = 0;
+    this.name = [...pathParts, file.name].join("/");
+    this.idx = Uploader.globalIdx++;
+    this.file = file;
+    this.url = newUrl(this.name);
+  }
+
+  upload() {
+    const { idx, name, url } = this;
+    const $row = document.createElement("tr");
+    $row.id = `upload${idx}`;
+    $row.className = "uploader";
+
+    const $iconCell = document.createElement("td");
+    $iconCell.className = "path cell-icon";
+    $iconCell.innerHTML = getPathSvg("File");
+
+    const $nameCell = document.createElement("td");
+    $nameCell.className = "path cell-name";
+    const $link = document.createElement("a");
+    $link.href = url;
+    $link.textContent = name;
+    $nameCell.appendChild($link);
+
+    const $statusCell = document.createElement("td");
+    $statusCell.className = "cell-status upload-status";
+    $statusCell.id = `uploadStatus${idx}`;
+
+    $row.append($iconCell, $nameCell, $statusCell);
+    $uploadersTable.appendChild($row);
+    $uploadersTable.classList.remove("hidden");
+    $emptyFolder.classList.add("hidden");
+    this.$uploadStatus = document.getElementById(`uploadStatus${idx}`);
+    this.$uploadStatus.innerHTML = '-';
+    this.$uploadStatus.addEventListener("click", e => {
+      const nodeId = e.target.id;
+      const matches = /^retry(\d+)$/.exec(nodeId);
+      if (matches) {
+        const id = parseInt(matches[1]);
+        let uploader = failUploaders.get(id);
+        if (uploader) uploader.retry();
+      }
+    });
+    Uploader.queues.push(this);
+    Uploader.runQueue();
+  }
+
+  ajax() {
+    const { url } = this;
+
+    this.uploaded = 0;
+    this.lastUptime = Date.now();
+
+    const ajax = new XMLHttpRequest();
+    ajax.upload.addEventListener("progress", e => this.progress(e), false);
+    ajax.addEventListener("readystatechange", () => {
+      if (ajax.readyState === 4) {
+        if (ajax.status >= 200 && ajax.status < 300) {
+          this.complete();
+        } else {
+          if (ajax.status !== 0) {
+            this.fail(`${ajax.status} ${ajax.statusText}`);
+          }
+        }
+      }
+    })
+    ajax.addEventListener("error", () => this.fail(), false);
+    ajax.addEventListener("abort", () => this.fail(), false);
+    if (this.uploadOffset > 0) {
+      ajax.open("PATCH", url);
+      ajax.setRequestHeader("X-Update-Range", "append");
+      ajax.send(this.file.slice(this.uploadOffset));
+    } else {
+      ajax.open("PUT", url);
+      ajax.send(this.file);
+      // setTimeout(() => ajax.abort(), 3000);
+    }
+  }
+
+  async retry() {
+    const { url } = this;
+    let res = await fetch(url, {
+      method: "HEAD",
+    });
+    let uploadOffset = 0;
+    if (res.status === 200) {
+      let value = res.headers.get("content-length");
+      uploadOffset = parseInt(value) || 0;
+    }
+    this.uploadOffset = uploadOffset;
+    this.ajax();
+  }
+
+  progress(event) {
+    const now = Date.now();
+    const elapsed = now - this.lastUptime;
+    if (elapsed < 300) return; // throttle update for safari
+    const speed = (event.loaded - this.uploaded) / elapsed * 1000;
+    const [speedValue, speedUnit] = formatFileSize(speed);
+    const speedText = `${speedValue} ${speedUnit}/s`;
+    const progress = formatPercent(((event.loaded + this.uploadOffset) / this.file.size) * 100);
+    const duration = formatDuration((event.total - event.loaded) / speed);
+    this.$uploadStatus.replaceChildren(
+      createStatusSpan(speedText, "80px"),
+      createStatusSpan(`${progress} ${duration}`, null, "5px"),
+    );
+    this.uploaded = event.loaded;
+    this.lastUptime = now;
+  }
+
+  complete() {
+    const $uploadStatusNew = this.$uploadStatus.cloneNode(true);
+    $uploadStatusNew.textContent = `✓`;
+    this.$uploadStatus.parentNode.replaceChild($uploadStatusNew, this.$uploadStatus);
+    this.$uploadStatus = null;
+    failUploaders.delete(this.idx);
+    Uploader.runnings--;
+    Uploader.runQueue();
+  }
+
+  fail(reason = "") {
+    const $failed = createStatusSpan("✗", "20px");
+    $failed.title = reason;
+    const $retry = createStatusSpan("↻");
+    $retry.className = "retry-btn";
+    $retry.id = `retry${this.idx}`;
+    $retry.title = "Retry";
+    this.$uploadStatus.replaceChildren($failed, $retry);
+    failUploaders.set(this.idx, this);
+    Uploader.runnings--;
+    Uploader.runQueue();
+    notify(`Upload failed${reason ? `: ${reason}` : ""}`);
+  }
+}
+
+function createStatusSpan(text, width, marginLeft) {
+  const $span = document.createElement("span");
+  $span.textContent = text;
+  if (width) {
+    $span.style.width = width;
+  }
+  if (marginLeft) {
+    $span.style.marginLeft = marginLeft;
+  }
+  return $span;
+}
+
+Uploader.globalIdx = 0;
+
+Uploader.runnings = 0;
+
+Uploader.auth = false;
+
+/**
+ * @type Uploader[]
+ */
+Uploader.queues = [];
+
+
+Uploader.runQueue = async () => {
+  if (Uploader.runnings >= DUFS_MAX_UPLOADINGS) return;
+  if (Uploader.queues.length === 0) return;
+  Uploader.runnings++;
+  let uploader = Uploader.queues.shift();
+  if (!Uploader.auth) {
+    Uploader.auth = true;
+    try {
+      await checkAuth();
+    } catch {
+      Uploader.auth = false;
+    }
+  }
+  uploader.ajax();
+}
+
+/**
+ * Add breadcrumb
+ * @param {string} href
+ * @param {string} uri_prefix
+ */
+function addBreadcrumb(href, uri_prefix) {
+  const $breadcrumb = document.querySelector(".breadcrumb");
+  let parts = [];
+  if (href === "/") {
+    parts = [""];
+  } else {
+    parts = href.split("/");
+  }
+  const len = parts.length;
+  let path = uri_prefix;
+  for (let i = 0; i < len; i++) {
+    const name = parts[i];
+    if (i > 0) {
+      if (!path.endsWith("/")) {
+        path += "/";
+      }
+      path += encodeURIComponent(name);
+    }
+    const encodedName = encodedStr(name);
+    if (i === 0) {
+      $breadcrumb.insertAdjacentHTML("beforeend", `<a href="${path}" title="Root"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5z"/></svg></a>`);
+    } else if (i === len - 1) {
+      $breadcrumb.insertAdjacentHTML("beforeend", `<b>${encodedName}</b>`);
+    } else {
+      $breadcrumb.insertAdjacentHTML("beforeend", `<a href="${path}">${encodedName}</a>`);
+    }
+    if (i !== len - 1) {
+      $breadcrumb.insertAdjacentHTML("beforeend", `<span class="separator">/</span>`);
+    }
+  }
+}
+
+async function setupIndexPage() {
+  renderPermissionPanel();
+
+  if (DATA.allow_archive) {
+    const $download = document.querySelector(".download");
+    $download.href = baseUrl() + "?zip";
+    $download.title = "Download folder as a .zip file";
+    $download.classList.add("dlwt");
+    $download.classList.remove("hidden");
+  }
+
+  if (DATA.allow_upload) {
+    setupDropzone();
+    setupUploadFile();
+    setupNewFolder();
+    setupNewFile();
+  }
+
+  if (DATA.auth) {
+    await setupAuth();
+  }
+
+  if (DATA.allow_search) {
+    setupSearch();
+  }
+
+  renderPathsTableHead();
+  renderPathsTableBody();
+
+  if (selectionEnabled()) {
+    setupSelectionUx();
+  }
+
+  if (DATA.user) {
+    setupDownloadWithToken();
+  }
+}
+
+/**
+ * Render the current user's access summary and, for admins, the permission overview.
+ * All values are rendered via textContent — never innerHTML — since names,
+ * groups, roles and paths are user-controlled configuration data.
+ */
+function renderPermissionPanel() {
+  const $panel = document.querySelector(".permission-panel");
+  if (!$panel || !DATA.current_permission) {
+    return;
+  }
+  $panel.replaceChildren();
+
+  const permission = DATA.current_permission;
+  const $summary = document.createElement("div");
+  $summary.className = "permission-summary";
+  $summary.appendChild(createPermissionBadge(permission));
+
+  const $who = document.createElement("span");
+  if (DATA.user) {
+    $who.append("Signed in as ");
+    const $name = document.createElement("b");
+    $name.textContent = DATA.user;
+    $who.appendChild($name);
+  } else {
+    $who.textContent = "Anonymous access";
+  }
+  $summary.appendChild($who);
+
+  const $hint = document.createElement("span");
+  $hint.textContent = permission.can_write
+    ? "Can manage files here"
+    : permission.can_read
+      ? "Read-only folder"
+      : "Limited folder index";
+  $summary.appendChild($hint);
+
+  $panel.appendChild($summary);
+
+  if (DATA.is_admin && DATA.permissions) {
+    $panel.appendChild(renderAdminPermissionOverview(DATA.permissions));
+  }
+
+  $panel.classList.remove("hidden");
+}
+
+/**
+ * Build a permission badge element using only whitelisted CSS classes.
+ */
+function createPermissionBadge(permission, extraClass) {
+  const $badge = document.createElement("span");
+  $badge.className = ["permission-badge", permissionClass(permission.access), extraClass]
+    .filter(Boolean)
+    .join(" ");
+  $badge.title = permission.access;
+  $badge.textContent = permission.role;
+  return $badge;
+}
+
+function renderAdminPermissionOverview(permissions) {
+  const overview = permissions && typeof permissions === "object" ? permissions : {};
+  const users = Array.isArray(overview.users) ? overview.users : [];
+  const groups = Array.isArray(overview.groups) ? overview.groups : [];
+  const roles = Array.isArray(overview.roles) ? overview.roles : [];
+
+  const $details = document.createElement("details");
+  $details.className = "admin-permissions";
+  const $summary = document.createElement("summary");
+  $summary.textContent = "Permission management overview";
+  $details.appendChild($summary);
+
+  const $grid = document.createElement("div");
+  $grid.className = "permission-grid";
+  $grid.appendChild(permissionColumn("Users", users, user => {
+    const $card = permissionCard(user.name, [
+      ["Groups", (user.groups || []).join(", ") || "-"],
+      ["Roles", (user.roles || []).join(", ") || "-"],
+      ["Paths", (user.paths || []).join(", ") || "-"],
+    ]);
+    if (user.admin) {
+      const $adminBadge = createPermissionBadge({ access: "read-write", role: "Admin" });
+      $card.firstChild.appendChild($adminBadge);
+    }
+    return $card;
+  }));
+  $grid.appendChild(permissionColumn("Groups", groups, group => permissionCard(group.name, [
+    ["Members", (group.members || []).join(", ") || "-"],
+    ["Roles", (group.roles || []).join(", ") || "-"],
+    ["Paths", (group.paths || []).join(", ") || "-"],
+  ])));
+  $grid.appendChild(permissionColumn("Roles", roles, role => permissionCard(role.name, [
+    ["Description", role.description || "-"],
+    ["Paths", (role.paths || []).join(", ") || "-"],
+  ])));
+  $details.appendChild($grid);
+  return $details;
+}
+
+function permissionColumn(title, items, renderItem) {
+  const $column = document.createElement("div");
+  const $heading = document.createElement("h3");
+  $heading.textContent = title;
+  $column.appendChild($heading);
+  if (!items.length) {
+    const $empty = document.createElement("div");
+    $empty.className = "permission-muted";
+    $empty.textContent = `No configured ${title.toLowerCase()}`;
+    $column.appendChild($empty);
+  } else {
+    for (const item of items) {
+      $column.appendChild(renderItem(item));
+    }
+  }
+  return $column;
+}
+
+function permissionCard(name, rows) {
+  const $card = document.createElement("div");
+  $card.className = "permission-card";
+  const $title = document.createElement("b");
+  $title.textContent = name;
+  $card.appendChild($title);
+  for (const [label, value] of rows) {
+    const $row = document.createElement("div");
+    $row.textContent = `${label}: ${value}`;
+    $card.appendChild($row);
+  }
+  return $card;
+}
+
+/**
+ * Whitelist mapping of permission access values to CSS classes.
+ * Never construct permission classes dynamically from server data.
+ */
+function permissionClass(access) {
+  switch (access) {
+    case "read-write":
+      return "permission-read-write";
+    case "read-only":
+      return "permission-read-only";
+    case "limited":
+      return "permission-limited";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Selection is available whenever destructive path operations are allowed;
+ * both bulk delete and bulk move require delete permission server-side.
+ */
+function selectionEnabled() {
+  return DATA.kind === "Index" && !!DATA.allow_delete;
+}
+
+function toggleRowSelection(index, checked, shiftKey) {
+  if (shiftKey && lastCheckedIndex !== null) {
+    const [lo, hi] = [Math.min(lastCheckedIndex, index), Math.max(lastCheckedIndex, index)];
+    for (let i = lo; i <= hi; i++) {
+      if (DATA.paths[i]) setRowSelected(i, checked);
+    }
+  } else {
+    setRowSelected(index, checked);
+  }
+  lastCheckedIndex = index;
+  updateBulkToolbar();
+}
+
+function setRowSelected(index, selected) {
+  const $row = document.getElementById(`addPath${index}`);
+  if (!$row) return;
+  const $checkbox = $row.querySelector(".path-select");
+  if (selected) {
+    selectedPaths.add(index);
+  } else {
+    selectedPaths.delete(index);
+  }
+  if ($checkbox) $checkbox.checked = selected;
+  $row.classList.toggle("selected", selected);
+}
+
+function selectAllPaths() {
+  for (let i = 0; i < DATA.paths.length; i++) {
+    if (DATA.paths[i]) setRowSelected(i, true);
+  }
+  updateBulkToolbar();
+}
+
+function clearSelection() {
+  for (const index of [...selectedPaths]) {
+    setRowSelected(index, false);
+  }
+  lastCheckedIndex = null;
+  updateBulkToolbar();
+}
+
+function updateBulkToolbar() {
+  const $toolbar = document.querySelector(".bulk-toolbar");
+  if (!$toolbar) return;
+  const count = selectedPaths.size;
+  if (count === 0) {
+    $toolbar.classList.add("hidden");
+  } else {
+    $toolbar.querySelector(".bulk-count").textContent =
+      count === 1 ? "1 item selected" : `${count} items selected`;
+    $toolbar.classList.remove("hidden");
+  }
+  const $selectAll = document.querySelector(".select-all");
+  if ($selectAll) {
+    const total = DATA.paths.filter(Boolean).length;
+    $selectAll.checked = count > 0 && count === total;
+    $selectAll.indeterminate = count > 0 && count < total;
+  }
+}
+
+function setupSelectionUx() {
+  const $toolbar = document.querySelector(".bulk-toolbar");
+  if (!$toolbar) return;
+  $toolbar.querySelector(".bulk-delete").addEventListener("click", bulkDelete);
+  $toolbar.querySelector(".bulk-move").addEventListener("click", bulkMove);
+  $toolbar.querySelector(".bulk-clear").addEventListener("click", clearSelection);
+
+  document.addEventListener("keydown", e => {
+    const target = e.target;
+    const inField = target instanceof HTMLElement &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" || target.isContentEditable);
+    if (inField) return;
+    if (e.key === "/" && DATA.allow_search) {
+      e.preventDefault();
+      document.getElementById("search")?.focus();
+    } else if (e.key === "Escape") {
+      clearSelection();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths.size > 0) {
+      e.preventDefault();
+      bulkDelete();
+    } else if (e.key === "F2" && selectedPaths.size === 1) {
+      e.preventDefault();
+      startInlineRename([...selectedPaths][0]);
+    } else if (e.key.toLowerCase() === "a" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      selectAllPaths();
+    }
+  });
+}
+
+async function bulkDelete() {
+  const indexes = [...selectedPaths].filter(i => DATA.paths[i]);
+  if (indexes.length === 0) return;
+  const names = indexes.map(i => DATA.paths[i].name);
+  const preview = names.slice(0, 5).join(", ") + (names.length > 5 ? `, … (${names.length} total)` : "");
+  if (!confirm(`Delete ${names.length} selected item(s)?\n\n${preview}`)) return;
+  const failed = [];
+  try {
+    await checkAuth();
+  } catch {
+    return;
+  }
+  for (const index of indexes) {
+    const file = DATA.paths[index];
+    try {
+      const res = await fetch(newUrl(file.name), { method: "DELETE" });
+      await assertResOK(res);
+      document.getElementById(`addPath${index}`)?.remove();
+      DATA.paths[index] = null;
+      selectedPaths.delete(index);
+    } catch (err) {
+      failed.push(`${file.name}: ${err.message}`);
+    }
+  }
+  updateBulkToolbar();
+  if (!DATA.paths.find(v => !!v)) {
+    $pathsTable.classList.add("hidden");
+    $emptyFolder.textContent = DIR_EMPTY_NOTE;
+    $emptyFolder.classList.remove("hidden");
+  }
+  if (failed.length) {
+    notify(`Failed to delete: ${failed.join("; ")}`);
+  }
+}
+
+async function bulkMove() {
+  const indexes = [...selectedPaths].filter(i => DATA.paths[i]);
+  if (indexes.length === 0) return;
+  const prefix = DATA.uri_prefix.slice(0, -1);
+  const currentDir = decodeURIComponent(new URL(baseUrl()).pathname.slice(prefix.length)) || "/";
+  let dest = prompt(`Move ${indexes.length} item(s) to folder`, currentDir);
+  if (!dest) return;
+  if (!dest.startsWith("/")) dest = "/" + dest;
+  if (!dest.endsWith("/")) dest += "/";
+  const failed = [];
+  try {
+    await checkAuth();
+  } catch {
+    return;
+  }
+  for (const index of indexes) {
+    const file = DATA.paths[index];
+    const destUrl = location.origin + prefix +
+      (dest + file.name).split("/").map(encodeURIComponent).join("/");
+    try {
+      const res = await fetch(newUrl(file.name), {
+        method: "MOVE",
+        headers: { "Destination": destUrl },
+      });
+      await assertResOK(res);
+    } catch (err) {
+      failed.push(`${file.name}: ${err.message}`);
+    }
+  }
+  if (failed.length) {
+    notify(`Failed to move: ${failed.join("; ")}`);
+    setTimeout(() => location.reload(), 2500);
+  } else {
+    location.reload();
+  }
+}
+
+/**
+ * Replace a row's name link with an inline text input; Enter commits
+ * (rename within the current folder via MOVE), Escape cancels.
+ */
+function startInlineRename(index) {
+  const file = DATA.paths[index];
+  if (!file || !(DATA.allow_delete && DATA.allow_upload)) return;
+  const $row = document.getElementById(`addPath${index}`);
+  const $nameCell = $row?.querySelector(".cell-name");
+  const $link = $nameCell?.querySelector("a");
+  if (!$nameCell || !$link || $nameCell.querySelector(".rename-input")) return;
+
+  const $input = document.createElement("input");
+  $input.type = "text";
+  $input.className = "rename-input";
+  $input.value = file.name;
+  $link.classList.add("hidden");
+  $nameCell.appendChild($input);
+  $input.focus();
+  const dotAt = file.name.lastIndexOf(".");
+  $input.setSelectionRange(0, dotAt > 0 ? dotAt : file.name.length);
+
+  const finish = () => {
+    $input.remove();
+    $link.classList.remove("hidden");
+  };
+  $input.addEventListener("keydown", async e => {
+    if (e.key === "Escape") {
+      finish();
+    } else if (e.key === "Enter") {
+      const newName = $input.value.trim();
+      if (!newName || newName === file.name) {
+        finish();
+        return;
+      }
+      if (newName.includes("/")) {
+        notify("Name cannot contain `/`; use Move for changing folders");
+        return;
+      }
+      try {
+        await checkAuth();
+        const res = await fetch(newUrl(file.name), {
+          method: "MOVE",
+          headers: { "Destination": newUrl(newName) },
+        });
+        await assertResOK(res);
+        location.reload();
+      } catch (err) {
+        notify(`Cannot rename \`${file.name}\`, ${err.message}`);
+        finish();
+      }
+    }
+  });
+  $input.addEventListener("blur", finish);
+}
+
+/**
+ * Render path table thead
+ */
+function renderPathsTableHead() {
+  const headerItems = [
+    {
+      name: "name",
+      props: `colspan="2"`,
+      text: "Name",
+    },
+    {
+      name: "mtime",
+      props: ``,
+      text: "Last Modified",
+    },
+    {
+      name: "size",
+      props: ``,
+      text: "Size",
+    }
+  ];
+  const selectTh = selectionEnabled()
+    ? `<th class="cell-select"><input type="checkbox" class="select-all" title="Select all" aria-label="Select all"></th>`
+    : "";
+  $pathsTableHead.insertAdjacentHTML("beforeend", `
+    <tr>
+      ${selectTh}
+      ${headerItems.map(item => {
+    let svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.5 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L11 2.707V14.5a.5.5 0 0 0 .5.5zm-7-14a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L4 13.293V1.5a.5.5 0 0 1 .5-.5z"/></svg>`;
+    let order = "desc";
+    if (PARAMS.sort === item.name) {
+      if (PARAMS.order === "desc") {
+        order = "asc";
+        svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 1a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L7.5 13.293V1.5A.5.5 0 0 1 8 1z"/></svg>`
+      } else {
+        svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L7.5 2.707V14.5a.5.5 0 0 0 .5.5z"/></svg>`
+      }
+    }
+    const qs = new URLSearchParams({ ...PARAMS, order, sort: item.name }).toString();
+    const icon = `<span>${svg}</span>`
+    return `<th class="cell-${item.name}" ${item.props}><a href="?${qs}">${item.text}${icon}</a></th>`
+  }).join("\n")}
+      <th class="cell-actions">Actions</th>
+    </tr>
+  `);
+  const $selectAll = $pathsTableHead.querySelector(".select-all");
+  if ($selectAll) {
+    $selectAll.addEventListener("change", () => {
+      if ($selectAll.checked) {
+        selectAllPaths();
+      } else {
+        clearSelection();
+      }
+    });
+  }
+}
+
+/**
+ * Render path table tbody
+ */
+function renderPathsTableBody() {
+  if (DATA.paths && DATA.paths.length > 0) {
+    const len = DATA.paths.length;
+    if (len > 0) {
+      $pathsTable.classList.remove("hidden");
+    }
+    for (let i = 0; i < len; i++) {
+      addPath(DATA.paths[i], i);
+    }
+  } else {
+    $emptyFolder.textContent = DIR_EMPTY_NOTE;
+    $emptyFolder.classList.remove("hidden");
+  }
+}
+
+/**
+ * Add pathitem
+ * @param {PathItem} file
+ * @param {number} index
+ */
+function addPath(file, index) {
+  let url = newUrl(file.name);
+  let isDir = file.path_type.endsWith("Dir");
+  if (isDir) {
+    url += "/";
+  }
+
+  let sizeDisplay = isDir ? formatDirSize(file.size) : formatFileSize(file.size).join(" ");
+
+  const $row = document.createElement("tr");
+  $row.id = `addPath${index}`;
+
+  if (selectionEnabled()) {
+    const $selectCell = document.createElement("td");
+    $selectCell.className = "cell-select";
+    const $checkbox = document.createElement("input");
+    $checkbox.type = "checkbox";
+    $checkbox.className = "path-select";
+    $checkbox.setAttribute("aria-label", `Select ${file.name}`);
+    $checkbox.addEventListener("click", e => {
+      toggleRowSelection(index, $checkbox.checked, e.shiftKey);
+    });
+    $selectCell.appendChild($checkbox);
+    $row.appendChild($selectCell);
+  }
+
+  const $iconCell = document.createElement("td");
+  $iconCell.className = "path cell-icon";
+  $iconCell.innerHTML = getPathSvg(file.path_type);
+
+  const $nameCell = document.createElement("td");
+  $nameCell.className = "path cell-name";
+  const $link = document.createElement("a");
+  $link.href = url;
+  if (!isDir) {
+    $link.target = "_blank";
+  }
+  $link.textContent = file.name;
+  $nameCell.appendChild($link);
+  if (file.permission) {
+    $nameCell.appendChild(createPermissionBadge(file.permission, "path-permission"));
+  }
+
+  const $mtimeCell = document.createElement("td");
+  $mtimeCell.className = "cell-mtime";
+  $mtimeCell.textContent = formatMtime(file.mtime);
+
+  const $sizeCell = document.createElement("td");
+  $sizeCell.className = "cell-size";
+  $sizeCell.textContent = sizeDisplay;
+
+  const $actionCell = document.createElement("td");
+  $actionCell.className = "cell-actions";
+  appendPathActions($actionCell, url, isDir, index);
+
+  $row.append($iconCell, $nameCell, $mtimeCell, $sizeCell, $actionCell);
+  $pathsTableBody.appendChild($row);
+}
+
+function appendPathActions($actionCell, url, isDir, index) {
+  if (isDir && DATA.allow_archive) {
+    $actionCell.appendChild(createActionLink(`${url}?zip`, "Download folder as a .zip file", ICONS.download, { download: true, className: "dlwt" }));
+  } else if (!isDir) {
+    $actionCell.appendChild(createActionLink(url, "Download file", ICONS.download, { download: true, className: "dlwt" }));
+  }
+
+  let hasEditAction = false;
+  if (DATA.allow_delete) {
+    if (DATA.allow_upload) {
+      $actionCell.appendChild(createActionButton("Move & Rename", ICONS.move, () => movePath(index), `moveBtn${index}`));
+      if (!isDir) {
+        hasEditAction = true;
+        $actionCell.appendChild(createActionLink(`${url}?edit`, "Edit file", ICONS.edit, { target: "_blank" }));
+      }
+    }
+    $actionCell.appendChild(createActionButton("Delete", ICONS.delete, () => deletePath(index), `deleteBtn${index}`));
+  }
+  if (!hasEditAction && !isDir) {
+    $actionCell.appendChild(createActionLink(`${url}?view`, "View file", ICONS.view, { target: "_blank" }));
+  }
+}
+
+function createActionLink(href, title, icon, options = {}) {
+  const $link = document.createElement("a");
+  $link.className = options.className ? `action-btn ${options.className}` : "action-btn";
+  $link.href = href;
+  $link.title = title;
+  if (options.download) {
+    $link.download = "";
+  }
+  if (options.target) {
+    $link.target = options.target;
+  }
+  $link.innerHTML = icon;
+  return $link;
+}
+
+function createActionButton(title, icon, onClick, id) {
+  const $button = document.createElement("button");
+  $button.type = "button";
+  $button.className = "action-btn";
+  $button.id = id;
+  $button.title = title;
+  $button.setAttribute("aria-label", title);
+  $button.addEventListener("click", onClick);
+  $button.innerHTML = icon;
+  return $button;
+}
+
+function setupDropzone() {
+  ["drag", "dragstart", "dragend", "dragover", "dragenter", "dragleave", "drop"].forEach(name => {
+    document.addEventListener(name, e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  ["dragover", "dragenter"].forEach(name => {
+    document.addEventListener(name, () => {
+      $dropHint?.classList.remove("hidden");
+    });
+  });
+  ["dragleave", "dragend", "drop"].forEach(name => {
+    document.addEventListener(name, () => {
+      $dropHint?.classList.add("hidden");
+    });
+  });
+  document.addEventListener("drop", async e => {
+    if (!e.dataTransfer.items[0].webkitGetAsEntry) {
+      const files = Array.from(e.dataTransfer.files).filter(v => v.size > 0);
+      for (const file of files) {
+        new Uploader(file, []).upload();
+      }
+    } else {
+      const entries = [];
+      const len = e.dataTransfer.items.length;
+      for (let i = 0; i < len; i++) {
+        entries.push(e.dataTransfer.items[i].webkitGetAsEntry());
+      }
+      addFileEntries(entries, []);
+    }
+    notify("Upload queue updated");
+  });
+}
+
+async function setupAuth() {
+  if (DATA.user) {
+    $logoutBtn.classList.remove("hidden");
+    $logoutBtn.addEventListener("click", logout);
+    $userName.textContent = DATA.user;
+  } else {
+    $loginBtn.classList.remove("hidden");
+    $loginBtn.addEventListener("click", async () => {
+      try {
+        await checkAuth("login");
+      } catch { }
+      location.reload();
+    });
+  }
+}
+
+function setupDownloadWithToken() {
+  document.querySelectorAll("a.dlwt").forEach(link => {
+    link.addEventListener("click", async e => {
+      e.preventDefault();
+      try {
+        const link = e.currentTarget || e.target;
+        const originalHref = link.getAttribute("href");
+        const tokengenUrl = new URL(originalHref);
+        tokengenUrl.searchParams.set("tokengen", "");
+        const res = await fetch(tokengenUrl);
+        if (!res.ok) throw new Error("Failed to fetch token");
+        const token = await res.text();
+        const downloadUrl = new URL(originalHref);
+        downloadUrl.searchParams.set("token", token);
+        const tempA = document.createElement("a");
+        tempA.href = downloadUrl.toString();
+        tempA.download = "";
+        document.body.appendChild(tempA);
+        tempA.click();
+        document.body.removeChild(tempA);
+      } catch (err) {
+        notify(`Failed to download, ${err.message}`);
+      }
+    });
+  });
+}
+
+function setupSearch() {
+  const $searchbar = document.querySelector(".searchbar");
+  $searchbar.classList.remove("hidden");
+  $searchbar.addEventListener("submit", event => {
+    event.preventDefault();
+    const formData = new FormData($searchbar);
+    const q = formData.get("q");
+    let href = baseUrl();
+    if (q) {
+      href += "?q=" + q;
+    }
+    location.href = href;
+  });
+  if (PARAMS.q) {
+    document.getElementById('search').value = PARAMS.q;
+  }
+}
+
+function setupUploadFile() {
+  document.querySelector(".upload-file").classList.remove("hidden");
+  document.getElementById("file").addEventListener("change", async e => {
+    const files = e.target.files;
+    for (let file of files) {
+      new Uploader(file, []).upload();
+    }
+  });
+}
+
+function setupNewFolder() {
+  const $newFolder = document.querySelector(".new-folder");
+  $newFolder.classList.remove("hidden");
+  $newFolder.addEventListener("click", () => {
+    const name = prompt("Enter folder name");
+    if (name) createFolder(name);
+  });
+}
+
+function setupNewFile() {
+  const $newFile = document.querySelector(".new-file");
+  $newFile.classList.remove("hidden");
+  $newFile.addEventListener("click", () => {
+    const name = prompt("Enter file name");
+    if (name) createFile(name);
+  });
+}
+
+function findPreviewHandler(ext) {
+  return PREVIEW_HANDLERS.find(h => h.exts.includes(ext));
+}
+
+const loadedVendorScripts = new Map();
+
+// Resolved once at startup, before any vendor script is injected,
+// so the lookup can't accidentally match an injected vendor script tag.
+const VENDOR_ASSETS_PREFIX = (document.currentScript
+  || document.querySelector('script[src*="index.js"]')).src.replace(/index\.js.*$/, "");
+
+/**
+ * Lazy-load a vendored library from the binary's embedded assets.
+ */
+function loadVendorScript(name) {
+  if (loadedVendorScripts.has(name)) {
+    return loadedVendorScripts.get(name);
+  }
+  const promise = new Promise((resolve, reject) => {
+    const $script = document.createElement("script");
+    $script.src = `${VENDOR_ASSETS_PREFIX}vendor/${name}`;
+    $script.onload = resolve;
+    $script.onerror = () => reject(new Error(`failed to load ${name}`));
+    document.head.appendChild($script);
+  });
+  loadedVendorScripts.set(name, promise);
+  return promise;
+}
+
+function previewContainer() {
+  let $container = document.querySelector(".preview-container");
+  if (!$container) {
+    $container = document.createElement("div");
+    $container.className = "preview-container";
+    document.querySelector(".not-editable").after($container);
+  }
+  return $container;
+}
+
+async function runPreviewHandler(handler, url) {
+  for (const lib of handler.libs) {
+    await loadVendorScript(lib);
+  }
+  await handler.render(previewContainer(), url);
+}
+
+function renderIframePreview($container, url) {
+  const $iframe = document.createElement("iframe");
+  $iframe.src = url;
+  $iframe.setAttribute("sandbox", "");
+  $iframe.width = "100%";
+  $iframe.height = `${window.innerHeight - 100}px`;
+  $container.appendChild($iframe);
+}
+
+/**
+ * Strip active content from rendered markdown before inserting it.
+ * Raw HTML in markdown is parsed but scripts, event handlers, and
+ * javascript: URLs are removed.
+ */
+function sanitizeHtmlFragment(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  for (const $el of doc.querySelectorAll("script, iframe, object, embed, style, link, meta, form")) {
+    $el.remove();
+  }
+  for (const $el of doc.body.querySelectorAll("*")) {
+    for (const attr of [...$el.attributes]) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) {
+        $el.removeAttribute(attr.name);
+      } else if ((name === "href" || name === "src" || name === "xlink:href")
+        && /^\s*(javascript|data|vbscript):/i.test(attr.value)) {
+        $el.removeAttribute(attr.name);
+      }
+    }
+  }
+  return doc.body;
+}
+
+async function renderMarkdownPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const text = await res.text();
+  const html = marked.parse(text, { mangle: false, headerIds: false });
+  const $article = document.createElement("article");
+  $article.className = "markdown-body";
+  $article.append(...sanitizeHtmlFragment(html).childNodes);
+  $container.appendChild($article);
+}
+
+/**
+ * Minimal RFC4180-ish parser handling quoted fields and embedded delimiters.
+ */
+function parseDsv(text, delimiter) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === delimiter) {
+      row.push(field); field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      rows.push(row); row = [];
+    } else {
+      field += c;
+    }
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const MAX_PREVIEW_ROWS = 2000;
+
+function buildTable(rows, headerRow) {
+  const $table = document.createElement("table");
+  $table.className = "preview-table";
+  const shown = rows.slice(0, MAX_PREVIEW_ROWS);
+  shown.forEach((cells, rowIndex) => {
+    const $tr = document.createElement("tr");
+    for (const cell of cells) {
+      const $cell = document.createElement(headerRow && rowIndex === 0 ? "th" : "td");
+      $cell.textContent = cell === undefined || cell === null ? "" : String(cell);
+      $tr.appendChild($cell);
+    }
+    $table.appendChild($tr);
+  });
+  return { $table, truncated: rows.length > MAX_PREVIEW_ROWS, total: rows.length };
+}
+
+function appendTruncationNote($container, result) {
+  if (result.truncated) {
+    const $note = document.createElement("div");
+    $note.className = "preview-note";
+    $note.textContent = `Showing first ${MAX_PREVIEW_ROWS} of ${result.total} rows — download the file for the full data.`;
+    $container.appendChild($note);
+  }
+}
+
+async function renderCsvPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const text = await res.text();
+  const delimiter = extName(baseName(url)) === ".tsv" ? "\t" : ",";
+  const rows = parseDsv(text, delimiter);
+  const result = buildTable(rows, true);
+  const $wrap = document.createElement("div");
+  $wrap.className = "preview-table-wrap";
+  $wrap.appendChild(result.$table);
+  $container.appendChild($wrap);
+  appendTruncationNote($container, result);
+}
+
+async function renderSheetPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const buffer = await res.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const $tabs = document.createElement("div");
+  $tabs.className = "preview-tabs";
+  const $sheetHost = document.createElement("div");
+  $sheetHost.className = "preview-table-wrap";
+  $container.append($tabs, $sheetHost);
+
+  const showSheet = name => {
+    $sheetHost.replaceChildren();
+    for (const $btn of $tabs.children) {
+      $btn.classList.toggle("active", $btn.textContent === name);
+    }
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 });
+    const result = buildTable(rows, true);
+    $sheetHost.appendChild(result.$table);
+    appendTruncationNote($sheetHost, result);
+  };
+
+  for (const name of workbook.SheetNames) {
+    const $btn = document.createElement("button");
+    $btn.type = "button";
+    $btn.className = "preview-tab";
+    $btn.textContent = name;
+    $btn.addEventListener("click", () => showSheet(name));
+    $tabs.appendChild($btn);
+  }
+  if (workbook.SheetNames.length > 0) {
+    showSheet(workbook.SheetNames[0]);
+  }
+}
+
+async function renderDocxPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const blob = await res.blob();
+  const $host = document.createElement("div");
+  $host.className = "docx-host";
+  $container.appendChild($host);
+  await docx.renderAsync(blob, $host, null, { inWrapper: true, ignoreLastRenderedPageBreak: true });
+}
+
+function renderOfficeFallback($container, url) {
+  const $note = document.createElement("div");
+  $note.className = "preview-note";
+  $note.append("In-browser preview for this format is not supported yet. ");
+  const $link = document.createElement("a");
+  $link.href = url;
+  $link.download = "";
+  $link.textContent = "Download the file";
+  $note.appendChild($link);
+  $note.append(" to open it locally.");
+  $container.appendChild($note);
+}
+
+async function setupEditorPage() {
+  const url = baseUrl();
+
+  const $download = document.querySelector(".download");
+  $download.classList.remove("hidden");
+  $download.href = url;
+
+  if (DATA.kind === "Edit") {
+    const $moveFile = document.querySelector(".move-file");
+    $moveFile.classList.remove("hidden");
+    $moveFile.addEventListener("click", async () => {
+      const query = location.href.slice(url.length);
+      const newFileUrl = await doMovePath(url);
+      if (newFileUrl) {
+        location.href = newFileUrl + query;
+      }
+    });
+
+    const $deleteFile = document.querySelector(".delete-file");
+    $deleteFile.classList.remove("hidden");
+    $deleteFile.addEventListener("click", async () => {
+      const url = baseUrl();
+      const name = baseName(url);
+      await doDeletePath(name, url, () => {
+        location.href = location.href.split("/").slice(0, -1).join("/");
+      });
+    });
+
+    if (DATA.editable) {
+      const $saveBtn = document.querySelector(".save-btn");
+      $saveBtn.classList.remove("hidden");
+      $saveBtn.addEventListener("click", saveChange);
+    }
+  } else if (DATA.kind === "View") {
+    $editor.readOnly = true;
+  }
+
+  const ext = extName(baseName(url));
+  const handler = findPreviewHandler(ext);
+  // In View mode always prefer a rich preview when a handler exists
+  // (rendered markdown, spreadsheet grid, …); Edit mode keeps the editor
+  // for editable files and falls back to preview only for binaries.
+  if ((DATA.kind === "View" && handler) || !DATA.editable) {
+    const $notEditable = document.querySelector(".not-editable");
+    if (handler) {
+      try {
+        await runPreviewHandler(handler, url);
+      } catch (err) {
+        $notEditable.classList.remove("hidden");
+        $notEditable.textContent = `Failed to preview file, ${err.message}`;
+      }
+    } else {
+      $notEditable.classList.remove("hidden");
+      $notEditable.textContent = "Cannot edit because file is too large or binary.";
+    }
+    return;
+  }
+
+  $editor.classList.remove("hidden");
+  try {
+    const res = await fetch(baseUrl());
+    await assertResOK(res);
+    const encoding = getEncoding(res.headers.get("content-type"));
+    if (encoding === "utf-8") {
+      $editor.value = await res.text();
+    } else {
+      const bytes = await res.arrayBuffer();
+      const dataView = new DataView(bytes);
+      const decoder = new TextDecoder(encoding);
+      $editor.value = decoder.decode(dataView);
+    }
+  } catch (err) {
+    notify(`Failed to get file, ${err.message}`);
+  }
+}
+
+/**
+ * Delete path
+ * @param {number} index
+ * @returns
+ */
+async function deletePath(index) {
+  const file = DATA.paths[index];
+  if (!file) return;
+  await doDeletePath(file.name, newUrl(file.name), () => {
+    document.getElementById(`addPath${index}`)?.remove();
+    DATA.paths[index] = null;
+    if (!DATA.paths.find(v => !!v)) {
+      $pathsTable.classList.add("hidden");
+      $emptyFolder.textContent = DIR_EMPTY_NOTE;
+      $emptyFolder.classList.remove("hidden");
+    }
+  });
+}
+
+async function doDeletePath(name, url, cb) {
+  if (!confirm(`Delete \`${name}\`?`)) return;
+  try {
+    await checkAuth();
+    const res = await fetch(url, {
+      method: "DELETE",
+    });
+    await assertResOK(res);
+    cb();
+  } catch (err) {
+    notify(`Cannot delete \`${name}\`, ${err.message}`);
+  }
+}
+
+/**
+ * Move path
+ * @param {number} index
+ * @returns
+ */
+async function movePath(index) {
+  const file = DATA.paths[index];
+  if (!file) return;
+  const fileUrl = newUrl(file.name);
+  const newFileUrl = await doMovePath(fileUrl);
+  if (newFileUrl) {
+    location.href = newFileUrl.split("/").slice(0, -1).join("/");
+  }
+}
+
+async function doMovePath(fileUrl) {
+  const fileUrlObj = new URL(fileUrl);
+
+  const prefix = DATA.uri_prefix.slice(0, -1);
+
+  const filePath = decodeURIComponent(fileUrlObj.pathname.slice(prefix.length));
+
+  let newPath = prompt("Enter new path", filePath);
+  if (!newPath) return;
+  if (!newPath.startsWith("/")) newPath = "/" + newPath;
+  if (filePath === newPath) return;
+  const newFileUrl = fileUrlObj.origin + prefix + newPath.split("/").map(encodeURIComponent).join("/");
+
+  try {
+    await checkAuth();
+    const res1 = await fetch(newFileUrl, {
+      method: "HEAD",
+    });
+    if (res1.status === 200) {
+      if (!confirm("Override existing file?")) {
+        return;
+      }
+    }
+    const res2 = await fetch(fileUrl, {
+      method: "MOVE",
+      headers: {
+        "Destination": newFileUrl,
+      }
+    });
+    await assertResOK(res2);
+    return newFileUrl;
+  } catch (err) {
+    notify(`Cannot move \`${filePath}\` to \`${newPath}\`, ${err.message}`);
+  }
+}
+
+
+/**
+ * Save editor change
+ */
+async function saveChange() {
+  try {
+    await fetch(baseUrl(), {
+      method: "PUT",
+      body: $editor.value,
+    });
+    location.reload();
+  } catch (err) {
+    notify(`Failed to save file, ${err.message}`);
+  }
+}
+
+async function checkAuth(variant) {
+  if (!DATA.auth) return;
+  const qs = variant ? `?${variant}` : "";
+  const res = await fetch(baseUrl() + qs, {
+    method: "CHECKAUTH",
+  });
+  await assertResOK(res);
+  $loginBtn.classList.add("hidden");
+  $logoutBtn.classList.remove("hidden");
+  $userName.textContent = await res.text();
+}
+
+function logout() {
+  if (!DATA.auth) return;
+  const url = baseUrl();
+  const xhr = new XMLHttpRequest();
+  xhr.open("LOGOUT", url, true, DATA.user);
+  xhr.onload = () => {
+    location.href = url;
+  }
+  xhr.send();
+}
+
+/**
+ * Create a folder
+ * @param {string} name
+ */
+async function createFolder(name) {
+  const url = newUrl(name);
+  try {
+    await checkAuth();
+    const res = await fetch(url, {
+      method: "MKCOL",
+    });
+    await assertResOK(res);
+    location.href = url;
+  } catch (err) {
+    notify(`Cannot create folder \`${name}\`, ${err.message}`);
+  }
+}
+
+async function createFile(name) {
+  const url = newUrl(name);
+  try {
+    await checkAuth();
+    const res = await fetch(url, {
+      method: "PUT",
+      body: "",
+    });
+    await assertResOK(res);
+    location.href = url + "?edit";
+  } catch (err) {
+    notify(`Cannot create file \`${name}\`, ${err.message}`);
+  }
+}
+
+async function addFileEntries(entries, dirs) {
+  for (const entry of entries) {
+    if (entry.isFile) {
+      entry.file(file => {
+        new Uploader(file, dirs).upload();
+      });
+    } else if (entry.isDirectory) {
+      const dirReader = entry.createReader();
+
+      const successCallback = entries => {
+        if (entries.length > 0) {
+          addFileEntries(entries, [...dirs, entry.name]);
+          dirReader.readEntries(successCallback);
+        }
+      };
+
+      dirReader.readEntries(successCallback);
+    }
+  }
+}
+
+
+function newUrl(name) {
+  let url = baseUrl();
+  if (!url.endsWith("/")) url += "/";
+  url += name.split("/").map(encodeURIComponent).join("/");
+  return url;
+}
+
+function baseUrl() {
+  return location.href.split(/[?#]/)[0];
+}
+
+function baseName(url) {
+  return decodeURIComponent(url.split("/").filter(v => v.length > 0).slice(-1)[0]);
+}
+
+function extName(filename) {
+  const dotIndex = filename.lastIndexOf('.');
+
+  if (dotIndex === -1 || dotIndex === 0 || dotIndex === filename.length - 1) {
+    return '';
+  }
+
+  return filename.substring(dotIndex);
+}
+
+function getPathSvg(path_type) {
+  switch (path_type) {
+    case "Dir":
+      return ICONS.dir;
+    case "SymlinkFile":
+      return ICONS.symlinkFile;
+    case "SymlinkDir":
+      return ICONS.symlinkDir;
+    default:
+      return ICONS.file;
+  }
+}
+
+function formatMtime(mtime) {
+  if (!mtime) return "";
+  const date = new Date(mtime);
+  const year = date.getFullYear();
+  const month = padZero(date.getMonth() + 1, 2);
+  const day = padZero(date.getDate(), 2);
+  const hours = padZero(date.getHours(), 2);
+  const minutes = padZero(date.getMinutes(), 2);
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function padZero(value, size) {
+  return ("0".repeat(size) + value).slice(-1 * size);
+}
+
+function formatDirSize(size) {
+  const unit = size === 1 ? "item" : "items";
+  const num = size >= MAX_SUBPATHS_COUNT ? `>${MAX_SUBPATHS_COUNT - 1}` : `${size}`;
+  return ` ${num} ${unit}`;
+}
+
+function formatFileSize(size) {
+  if (size === null || size === undefined) return [0, "B"];
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  if (size === 0) return [0, "B"];
+  const i = parseInt(Math.floor(Math.log(size) / Math.log(1024)));
+  const raw = size / Math.pow(1024, i);
+  let value;
+  if (i > 0 && raw < 999.95) {
+    value = Math.round(raw * 10) / 10;
+  } else {
+    value = Math.round(raw);
+  }
+  return [value, sizes[i]];
+}
+
+function formatDuration(seconds) {
+  seconds = Math.ceil(seconds);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds - h * 3600) / 60);
+  const s = seconds - h * 3600 - m * 60;
+  return `${padZero(h, 2)}:${padZero(m, 2)}:${padZero(s, 2)}`;
+}
+
+function formatPercent(percent) {
+  if (percent > 10) {
+    return percent.toFixed(1) + "%";
+  } else {
+    return percent.toFixed(2) + "%";
+  }
+}
+
+function encodedStr(rawStr) {
+  return rawStr.replace(/[\u00A0-\u9999<>&]/g, function (i) {
+    return '&#' + i.charCodeAt(0) + ';';
+  });
+}
+
+async function assertResOK(res) {
+  if (!(res.status >= 200 && res.status < 300)) {
+    throw new Error(await res.text() || `Invalid status ${res.status}`);
+  }
+}
+
+function getEncoding(contentType) {
+  const charset = contentType?.split(";")[1];
+  if (/charset/i.test(charset)) {
+    let encoding = charset.split("=")[1];
+    if (encoding) {
+      return encoding.toLowerCase();
+    }
+  }
+  return 'utf-8';
+}
+
+// Parsing base64 strings with Unicode characters
+function decodeBase64(base64String) {
+  const binString = atob(base64String);
+  const len = binString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binString.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}

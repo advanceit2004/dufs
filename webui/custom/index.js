@@ -72,6 +72,13 @@ const ICONS = {
 const failUploaders = new Map();
 
 /**
+ * Indexes of currently selected rows in DATA.paths.
+ * @type Set<number>
+ */
+const selectedPaths = new Set();
+let lastCheckedIndex = null;
+
+/**
  * @type Element
  */
 let $pathsTable;
@@ -471,6 +478,10 @@ async function setupIndexPage() {
   renderPathsTableHead();
   renderPathsTableBody();
 
+  if (selectionEnabled()) {
+    setupSelectionUx();
+  }
+
   if (DATA.user) {
     setupDownloadWithToken();
   }
@@ -623,6 +634,233 @@ function permissionClass(access) {
 }
 
 /**
+ * Selection is available whenever destructive path operations are allowed;
+ * both bulk delete and bulk move require delete permission server-side.
+ */
+function selectionEnabled() {
+  return DATA.kind === "Index" && !!DATA.allow_delete;
+}
+
+function toggleRowSelection(index, checked, shiftKey) {
+  if (shiftKey && lastCheckedIndex !== null) {
+    const [lo, hi] = [Math.min(lastCheckedIndex, index), Math.max(lastCheckedIndex, index)];
+    for (let i = lo; i <= hi; i++) {
+      if (DATA.paths[i]) setRowSelected(i, checked);
+    }
+  } else {
+    setRowSelected(index, checked);
+  }
+  lastCheckedIndex = index;
+  updateBulkToolbar();
+}
+
+function setRowSelected(index, selected) {
+  const $row = document.getElementById(`addPath${index}`);
+  if (!$row) return;
+  const $checkbox = $row.querySelector(".path-select");
+  if (selected) {
+    selectedPaths.add(index);
+  } else {
+    selectedPaths.delete(index);
+  }
+  if ($checkbox) $checkbox.checked = selected;
+  $row.classList.toggle("selected", selected);
+}
+
+function selectAllPaths() {
+  for (let i = 0; i < DATA.paths.length; i++) {
+    if (DATA.paths[i]) setRowSelected(i, true);
+  }
+  updateBulkToolbar();
+}
+
+function clearSelection() {
+  for (const index of [...selectedPaths]) {
+    setRowSelected(index, false);
+  }
+  lastCheckedIndex = null;
+  updateBulkToolbar();
+}
+
+function updateBulkToolbar() {
+  const $toolbar = document.querySelector(".bulk-toolbar");
+  if (!$toolbar) return;
+  const count = selectedPaths.size;
+  if (count === 0) {
+    $toolbar.classList.add("hidden");
+  } else {
+    $toolbar.querySelector(".bulk-count").textContent =
+      count === 1 ? "1 item selected" : `${count} items selected`;
+    $toolbar.classList.remove("hidden");
+  }
+  const $selectAll = document.querySelector(".select-all");
+  if ($selectAll) {
+    const total = DATA.paths.filter(Boolean).length;
+    $selectAll.checked = count > 0 && count === total;
+    $selectAll.indeterminate = count > 0 && count < total;
+  }
+}
+
+function setupSelectionUx() {
+  const $toolbar = document.querySelector(".bulk-toolbar");
+  if (!$toolbar) return;
+  $toolbar.querySelector(".bulk-delete").addEventListener("click", bulkDelete);
+  $toolbar.querySelector(".bulk-move").addEventListener("click", bulkMove);
+  $toolbar.querySelector(".bulk-clear").addEventListener("click", clearSelection);
+
+  document.addEventListener("keydown", e => {
+    const target = e.target;
+    const inField = target instanceof HTMLElement &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" || target.isContentEditable);
+    if (inField) return;
+    if (e.key === "/" && DATA.allow_search) {
+      e.preventDefault();
+      document.getElementById("search")?.focus();
+    } else if (e.key === "Escape") {
+      clearSelection();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths.size > 0) {
+      e.preventDefault();
+      bulkDelete();
+    } else if (e.key === "F2" && selectedPaths.size === 1) {
+      e.preventDefault();
+      startInlineRename([...selectedPaths][0]);
+    } else if (e.key.toLowerCase() === "a" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      selectAllPaths();
+    }
+  });
+}
+
+async function bulkDelete() {
+  const indexes = [...selectedPaths].filter(i => DATA.paths[i]);
+  if (indexes.length === 0) return;
+  const names = indexes.map(i => DATA.paths[i].name);
+  const preview = names.slice(0, 5).join(", ") + (names.length > 5 ? `, … (${names.length} total)` : "");
+  if (!confirm(`Delete ${names.length} selected item(s)?\n\n${preview}`)) return;
+  const failed = [];
+  try {
+    await checkAuth();
+  } catch {
+    return;
+  }
+  for (const index of indexes) {
+    const file = DATA.paths[index];
+    try {
+      const res = await fetch(newUrl(file.name), { method: "DELETE" });
+      await assertResOK(res);
+      document.getElementById(`addPath${index}`)?.remove();
+      DATA.paths[index] = null;
+      selectedPaths.delete(index);
+    } catch (err) {
+      failed.push(`${file.name}: ${err.message}`);
+    }
+  }
+  updateBulkToolbar();
+  if (!DATA.paths.find(v => !!v)) {
+    $pathsTable.classList.add("hidden");
+    $emptyFolder.textContent = DIR_EMPTY_NOTE;
+    $emptyFolder.classList.remove("hidden");
+  }
+  if (failed.length) {
+    notify(`Failed to delete: ${failed.join("; ")}`);
+  }
+}
+
+async function bulkMove() {
+  const indexes = [...selectedPaths].filter(i => DATA.paths[i]);
+  if (indexes.length === 0) return;
+  const prefix = DATA.uri_prefix.slice(0, -1);
+  const currentDir = decodeURIComponent(new URL(baseUrl()).pathname.slice(prefix.length)) || "/";
+  let dest = prompt(`Move ${indexes.length} item(s) to folder`, currentDir);
+  if (!dest) return;
+  if (!dest.startsWith("/")) dest = "/" + dest;
+  if (!dest.endsWith("/")) dest += "/";
+  const failed = [];
+  try {
+    await checkAuth();
+  } catch {
+    return;
+  }
+  for (const index of indexes) {
+    const file = DATA.paths[index];
+    const destUrl = location.origin + prefix +
+      (dest + file.name).split("/").map(encodeURIComponent).join("/");
+    try {
+      const res = await fetch(newUrl(file.name), {
+        method: "MOVE",
+        headers: { "Destination": destUrl },
+      });
+      await assertResOK(res);
+    } catch (err) {
+      failed.push(`${file.name}: ${err.message}`);
+    }
+  }
+  if (failed.length) {
+    notify(`Failed to move: ${failed.join("; ")}`);
+    setTimeout(() => location.reload(), 2500);
+  } else {
+    location.reload();
+  }
+}
+
+/**
+ * Replace a row's name link with an inline text input; Enter commits
+ * (rename within the current folder via MOVE), Escape cancels.
+ */
+function startInlineRename(index) {
+  const file = DATA.paths[index];
+  if (!file || !(DATA.allow_delete && DATA.allow_upload)) return;
+  const $row = document.getElementById(`addPath${index}`);
+  const $nameCell = $row?.querySelector(".cell-name");
+  const $link = $nameCell?.querySelector("a");
+  if (!$nameCell || !$link || $nameCell.querySelector(".rename-input")) return;
+
+  const $input = document.createElement("input");
+  $input.type = "text";
+  $input.className = "rename-input";
+  $input.value = file.name;
+  $link.classList.add("hidden");
+  $nameCell.appendChild($input);
+  $input.focus();
+  const dotAt = file.name.lastIndexOf(".");
+  $input.setSelectionRange(0, dotAt > 0 ? dotAt : file.name.length);
+
+  const finish = () => {
+    $input.remove();
+    $link.classList.remove("hidden");
+  };
+  $input.addEventListener("keydown", async e => {
+    if (e.key === "Escape") {
+      finish();
+    } else if (e.key === "Enter") {
+      const newName = $input.value.trim();
+      if (!newName || newName === file.name) {
+        finish();
+        return;
+      }
+      if (newName.includes("/")) {
+        notify("Name cannot contain `/`; use Move for changing folders");
+        return;
+      }
+      try {
+        await checkAuth();
+        const res = await fetch(newUrl(file.name), {
+          method: "MOVE",
+          headers: { "Destination": newUrl(newName) },
+        });
+        await assertResOK(res);
+        location.reload();
+      } catch (err) {
+        notify(`Cannot rename \`${file.name}\`, ${err.message}`);
+        finish();
+      }
+    }
+  });
+  $input.addEventListener("blur", finish);
+}
+
+/**
  * Render path table thead
  */
 function renderPathsTableHead() {
@@ -643,8 +881,12 @@ function renderPathsTableHead() {
       text: "Size",
     }
   ];
+  const selectTh = selectionEnabled()
+    ? `<th class="cell-select"><input type="checkbox" class="select-all" title="Select all" aria-label="Select all"></th>`
+    : "";
   $pathsTableHead.insertAdjacentHTML("beforeend", `
     <tr>
+      ${selectTh}
       ${headerItems.map(item => {
     let svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.5 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L11 2.707V14.5a.5.5 0 0 0 .5.5zm-7-14a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L4 13.293V1.5a.5.5 0 0 1 .5-.5z"/></svg>`;
     let order = "desc";
@@ -663,6 +905,16 @@ function renderPathsTableHead() {
       <th class="cell-actions">Actions</th>
     </tr>
   `);
+  const $selectAll = $pathsTableHead.querySelector(".select-all");
+  if ($selectAll) {
+    $selectAll.addEventListener("change", () => {
+      if ($selectAll.checked) {
+        selectAllPaths();
+      } else {
+        clearSelection();
+      }
+    });
+  }
 }
 
 /**
@@ -699,6 +951,20 @@ function addPath(file, index) {
 
   const $row = document.createElement("tr");
   $row.id = `addPath${index}`;
+
+  if (selectionEnabled()) {
+    const $selectCell = document.createElement("td");
+    $selectCell.className = "cell-select";
+    const $checkbox = document.createElement("input");
+    $checkbox.type = "checkbox";
+    $checkbox.className = "path-select";
+    $checkbox.setAttribute("aria-label", `Select ${file.name}`);
+    $checkbox.addEventListener("click", e => {
+      toggleRowSelection(index, $checkbox.checked, e.shiftKey);
+    });
+    $selectCell.appendChild($checkbox);
+    $row.appendChild($selectCell);
+  }
 
   const $iconCell = document.createElement("td");
   $iconCell.className = "path cell-icon";

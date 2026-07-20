@@ -467,6 +467,12 @@ dufs --assets webui/custom
 
 Keeping the fork WebUI in `webui/custom` reduces conflicts when syncing upstream updates to the original `assets` directory.
 
+The fork WebUI additionally provides:
+
+- **Permission visibility** — per-file access badges (Viewer/Editor/Limited), a current-access summary, and an admin-only permission overview panel
+- **File management** — multi-select with shift-click ranges, bulk delete/move, inline rename (F2), and keyboard shortcuts (`/` search, `Esc` clear, `Del` delete, `Ctrl/Cmd+A` select all)
+- **Document preview** (`?view`) — rendered Markdown, CSV/TSV tables, Excel workbooks (per-sheet tabs), and paginated Word documents, alongside the existing PDF/image/media preview. Preview libraries are embedded in the binary and lazy-loaded only when a matching file is opened; the release stays a single file and works fully offline. Adding a format is one entry in `PREVIEW_HANDLERS` (webui/custom/index.js) plus a vendored library under `webui/custom/vendor/`.
+
 Here are some Third-party customize UI project:
 
 - https://github.com/TransparentLC/dufs-material-assets

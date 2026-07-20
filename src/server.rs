@@ -55,6 +55,12 @@ const INDEX_HTML: &str = include_str!("../webui/custom/index.html");
 const INDEX_CSS: &str = include_str!("../webui/custom/index.css");
 const INDEX_JS: &str = include_str!("../webui/custom/index.js");
 const FAVICON_ICO: &[u8] = include_bytes!("../webui/custom/favicon.ico");
+// Lazy-loaded preview libraries; each is fetched by the webui only when a
+// matching file type is actually opened.
+const VENDOR_MARKED_JS: &str = include_str!("../webui/custom/vendor/marked.min.js");
+const VENDOR_XLSX_JS: &str = include_str!("../webui/custom/vendor/xlsx.full.min.js");
+const VENDOR_JSZIP_JS: &str = include_str!("../webui/custom/vendor/jszip.min.js");
+const VENDOR_DOCX_PREVIEW_JS: &str = include_str!("../webui/custom/vendor/docx-preview.min.js");
 const INDEX_NAME: &str = "index.html";
 const BUF_SIZE: usize = 65536;
 const EDITABLE_TEXT_MAX_SIZE: u64 = 4194304; // 4M
@@ -827,6 +833,22 @@ impl Server {
                         *res.body_mut() = body_full(FAVICON_ICO);
                         res.headers_mut()
                             .insert("content-type", HeaderValue::from_static("image/x-icon"));
+                    }
+                    "vendor/marked.min.js"
+                    | "vendor/xlsx.full.min.js"
+                    | "vendor/jszip.min.js"
+                    | "vendor/docx-preview.min.js" => {
+                        let body = match name {
+                            "vendor/marked.min.js" => VENDOR_MARKED_JS,
+                            "vendor/xlsx.full.min.js" => VENDOR_XLSX_JS,
+                            "vendor/jszip.min.js" => VENDOR_JSZIP_JS,
+                            _ => VENDOR_DOCX_PREVIEW_JS,
+                        };
+                        *res.body_mut() = body_full(body);
+                        res.headers_mut().insert(
+                            "content-type",
+                            HeaderValue::from_static("application/javascript; charset=UTF-8"),
+                        );
                     }
                     _ => {
                         status_not_found(res);

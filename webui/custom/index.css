@@ -686,3 +686,125 @@ button:focus-visible,
   color: var(--text-primary);
   min-width: 12em;
 }
+
+.preview-container {
+  padding: 1em;
+}
+
+.markdown-body {
+  max-width: 900px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.markdown-body pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 0.8em;
+  overflow-x: auto;
+}
+
+.markdown-body code {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border-primary);
+  padding: 0.3em 0.6em;
+}
+
+.markdown-body img {
+  max-width: 100%;
+}
+
+.markdown-body blockquote {
+  margin-left: 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--border-secondary);
+  color: var(--text-secondary);
+}
+
+.preview-table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 180px);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+}
+
+.preview-table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+  min-width: 100%;
+}
+
+.preview-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  text-align: left;
+  font-weight: 600;
+}
+
+.preview-table th,
+.preview-table td {
+  border: 1px solid var(--border-primary);
+  padding: 0.25em 0.6em;
+  white-space: nowrap;
+  max-width: 30em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-tabs {
+  display: flex;
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+  flex-wrap: wrap;
+}
+
+.preview-tab {
+  padding: 0.25em 0.9em;
+  border: 1px solid var(--border-secondary);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.preview-tab.active {
+  background: var(--text-accent);
+  border-color: var(--text-accent);
+  color: #fff;
+}
+
+.preview-note {
+  margin: 0.6em 0;
+  padding: 0.5em 0.8em;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+.docx-host {
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  overflow: auto;
+  max-height: calc(100vh - 160px);
+}
+
+.docx-host .docx-wrapper {
+  background: transparent;
+  padding: 1em 0;
+}

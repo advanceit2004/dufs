@@ -52,6 +52,20 @@ const IFRAME_FORMATS = [
   ".mp3", ".ogg", ".wav", ".m4a",
 ];
 
+/**
+ * Pluggable preview registry. Adding a format = one entry here plus, if
+ * needed, one vendored library under webui/custom/vendor/ (served by the
+ * binary and lazy-loaded only when a matching file is opened).
+ */
+const PREVIEW_HANDLERS = [
+  { exts: IFRAME_FORMATS, libs: [], render: renderIframePreview },
+  { exts: [".md", ".markdown"], libs: ["marked.min.js"], render: renderMarkdownPreview },
+  { exts: [".csv", ".tsv"], libs: [], render: renderCsvPreview },
+  { exts: [".xlsx", ".xls"], libs: ["xlsx.full.min.js"], render: renderSheetPreview },
+  { exts: [".docx"], libs: ["jszip.min.js", "docx-preview.min.js"], render: renderDocxPreview },
+  { exts: [".pptx", ".ppt"], libs: [], render: renderOfficeFallback },
+];
+
 const MAX_SUBPATHS_COUNT = 1000;
 
 const ICONS = {
@@ -1173,6 +1187,225 @@ function setupNewFile() {
   });
 }
 
+function findPreviewHandler(ext) {
+  return PREVIEW_HANDLERS.find(h => h.exts.includes(ext));
+}
+
+const loadedVendorScripts = new Map();
+
+// Resolved once at startup, before any vendor script is injected,
+// so the lookup can't accidentally match an injected vendor script tag.
+const VENDOR_ASSETS_PREFIX = (document.currentScript
+  || document.querySelector('script[src*="index.js"]')).src.replace(/index\.js.*$/, "");
+
+/**
+ * Lazy-load a vendored library from the binary's embedded assets.
+ */
+function loadVendorScript(name) {
+  if (loadedVendorScripts.has(name)) {
+    return loadedVendorScripts.get(name);
+  }
+  const promise = new Promise((resolve, reject) => {
+    const $script = document.createElement("script");
+    $script.src = `${VENDOR_ASSETS_PREFIX}vendor/${name}`;
+    $script.onload = resolve;
+    $script.onerror = () => reject(new Error(`failed to load ${name}`));
+    document.head.appendChild($script);
+  });
+  loadedVendorScripts.set(name, promise);
+  return promise;
+}
+
+function previewContainer() {
+  let $container = document.querySelector(".preview-container");
+  if (!$container) {
+    $container = document.createElement("div");
+    $container.className = "preview-container";
+    document.querySelector(".not-editable").after($container);
+  }
+  return $container;
+}
+
+async function runPreviewHandler(handler, url) {
+  for (const lib of handler.libs) {
+    await loadVendorScript(lib);
+  }
+  await handler.render(previewContainer(), url);
+}
+
+function renderIframePreview($container, url) {
+  const $iframe = document.createElement("iframe");
+  $iframe.src = url;
+  $iframe.setAttribute("sandbox", "");
+  $iframe.width = "100%";
+  $iframe.height = `${window.innerHeight - 100}px`;
+  $container.appendChild($iframe);
+}
+
+/**
+ * Strip active content from rendered markdown before inserting it.
+ * Raw HTML in markdown is parsed but scripts, event handlers, and
+ * javascript: URLs are removed.
+ */
+function sanitizeHtmlFragment(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  for (const $el of doc.querySelectorAll("script, iframe, object, embed, style, link, meta, form")) {
+    $el.remove();
+  }
+  for (const $el of doc.body.querySelectorAll("*")) {
+    for (const attr of [...$el.attributes]) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) {
+        $el.removeAttribute(attr.name);
+      } else if ((name === "href" || name === "src" || name === "xlink:href")
+        && /^\s*(javascript|data|vbscript):/i.test(attr.value)) {
+        $el.removeAttribute(attr.name);
+      }
+    }
+  }
+  return doc.body;
+}
+
+async function renderMarkdownPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const text = await res.text();
+  const html = marked.parse(text, { mangle: false, headerIds: false });
+  const $article = document.createElement("article");
+  $article.className = "markdown-body";
+  $article.append(...sanitizeHtmlFragment(html).childNodes);
+  $container.appendChild($article);
+}
+
+/**
+ * Minimal RFC4180-ish parser handling quoted fields and embedded delimiters.
+ */
+function parseDsv(text, delimiter) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === delimiter) {
+      row.push(field); field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      rows.push(row); row = [];
+    } else {
+      field += c;
+    }
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const MAX_PREVIEW_ROWS = 2000;
+
+function buildTable(rows, headerRow) {
+  const $table = document.createElement("table");
+  $table.className = "preview-table";
+  const shown = rows.slice(0, MAX_PREVIEW_ROWS);
+  shown.forEach((cells, rowIndex) => {
+    const $tr = document.createElement("tr");
+    for (const cell of cells) {
+      const $cell = document.createElement(headerRow && rowIndex === 0 ? "th" : "td");
+      $cell.textContent = cell === undefined || cell === null ? "" : String(cell);
+      $tr.appendChild($cell);
+    }
+    $table.appendChild($tr);
+  });
+  return { $table, truncated: rows.length > MAX_PREVIEW_ROWS, total: rows.length };
+}
+
+function appendTruncationNote($container, result) {
+  if (result.truncated) {
+    const $note = document.createElement("div");
+    $note.className = "preview-note";
+    $note.textContent = `Showing first ${MAX_PREVIEW_ROWS} of ${result.total} rows — download the file for the full data.`;
+    $container.appendChild($note);
+  }
+}
+
+async function renderCsvPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const text = await res.text();
+  const delimiter = extName(baseName(url)) === ".tsv" ? "\t" : ",";
+  const rows = parseDsv(text, delimiter);
+  const result = buildTable(rows, true);
+  const $wrap = document.createElement("div");
+  $wrap.className = "preview-table-wrap";
+  $wrap.appendChild(result.$table);
+  $container.appendChild($wrap);
+  appendTruncationNote($container, result);
+}
+
+async function renderSheetPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const buffer = await res.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const $tabs = document.createElement("div");
+  $tabs.className = "preview-tabs";
+  const $sheetHost = document.createElement("div");
+  $sheetHost.className = "preview-table-wrap";
+  $container.append($tabs, $sheetHost);
+
+  const showSheet = name => {
+    $sheetHost.replaceChildren();
+    for (const $btn of $tabs.children) {
+      $btn.classList.toggle("active", $btn.textContent === name);
+    }
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 });
+    const result = buildTable(rows, true);
+    $sheetHost.appendChild(result.$table);
+    appendTruncationNote($sheetHost, result);
+  };
+
+  for (const name of workbook.SheetNames) {
+    const $btn = document.createElement("button");
+    $btn.type = "button";
+    $btn.className = "preview-tab";
+    $btn.textContent = name;
+    $btn.addEventListener("click", () => showSheet(name));
+    $tabs.appendChild($btn);
+  }
+  if (workbook.SheetNames.length > 0) {
+    showSheet(workbook.SheetNames[0]);
+  }
+}
+
+async function renderDocxPreview($container, url) {
+  const res = await fetch(url);
+  await assertResOK(res);
+  const blob = await res.blob();
+  const $host = document.createElement("div");
+  $host.className = "docx-host";
+  $container.appendChild($host);
+  await docx.renderAsync(blob, $host, null, { inWrapper: true, ignoreLastRenderedPageBreak: true });
+}
+
+function renderOfficeFallback($container, url) {
+  const $note = document.createElement("div");
+  $note.className = "preview-note";
+  $note.append("In-browser preview for this format is not supported yet. ");
+  const $link = document.createElement("a");
+  $link.href = url;
+  $link.download = "";
+  $link.textContent = "Download the file";
+  $note.appendChild($link);
+  $note.append(" to open it locally.");
+  $container.appendChild($note);
+}
+
 async function setupEditorPage() {
   const url = baseUrl();
 
@@ -1207,20 +1440,23 @@ async function setupEditorPage() {
       $saveBtn.addEventListener("click", saveChange);
     }
   } else if (DATA.kind === "View") {
-    $editor.readonly = true;
+    $editor.readOnly = true;
   }
 
-  if (!DATA.editable) {
+  const ext = extName(baseName(url));
+  const handler = findPreviewHandler(ext);
+  // In View mode always prefer a rich preview when a handler exists
+  // (rendered markdown, spreadsheet grid, …); Edit mode keeps the editor
+  // for editable files and falls back to preview only for binaries.
+  if ((DATA.kind === "View" && handler) || !DATA.editable) {
     const $notEditable = document.querySelector(".not-editable");
-    const url = baseUrl();
-    const ext = extName(baseName(url));
-    if (IFRAME_FORMATS.find(v => v === ext)) {
-      const $iframe = document.createElement("iframe");
-      $iframe.src = url;
-      $iframe.setAttribute("sandbox", "");
-      $iframe.width = "100%";
-      $iframe.height = `${window.innerHeight - 100}px`;
-      $notEditable.after($iframe);
+    if (handler) {
+      try {
+        await runPreviewHandler(handler, url);
+      } catch (err) {
+        $notEditable.classList.remove("hidden");
+        $notEditable.textContent = `Failed to preview file, ${err.message}`;
+      }
     } else {
       $notEditable.classList.remove("hidden");
       $notEditable.textContent = "Cannot edit because file is too large or binary.";
